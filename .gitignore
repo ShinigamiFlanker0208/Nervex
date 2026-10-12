@@ -1,0 +1,6 @@
+.env
+.venv/
+uploads/
+execution_artifacts/
+__pycache__/
+.gradio/

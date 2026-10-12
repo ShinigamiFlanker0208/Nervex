@@ -1,0 +1,38 @@
+# SoulGraph Ephemeral Sandbox Docker Image Architecture
+# Minimal, hardened Ubuntu image pre-configured with NVIDIA CUDA, PyTorch, and execution dependencies.
+
+# TODO: Specify appropriate base CUDA developer image (e.g., nvidia/cuda:12.1.1-runtime-ubuntu22.04)
+# FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+
+# TODO: Set environment variables to eliminate interactive timezone/apt prompts and force Python unbuffered I/O
+# ENV DEBIAN_FRONTEND=noninteractive \
+#     PYTHONUNBUFFERED=1 \
+#     PYTHONDONTWRITEBYTECODE=1
+
+# TODO: Install Python 3.11, pip, build utilities, and security hardening packages
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     python3.11 \
+#     python3-pip \
+#     && rm -rf /var/lib/apt/lists/*
+
+# TODO: Create dedicated non-root user and group (`soulgraph_user:1000`) for privilege isolation
+# RUN groupadd -g 1000 soulgraph_group && \
+#     useradd -u 1000 -g soulgraph_group -m -s /bin/bash soulgraph_user
+
+# TODO: Pre-install core backend tensor computing libraries (PyTorch with CUDA, JAX, Equinox, Einops, NumPy)
+# RUN pip3 install --no-cache-dir \
+#     torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121 \
+#     jax[cuda12] \
+#     equinox \
+#     einops \
+#     numpy
+
+# TODO: Configure working directory and permissions
+# WORKDIR /workspace
+# RUN chown -R soulgraph_user:soulgraph_group /workspace
+
+# TODO: Switch execution authority to non-root user
+# USER soulgraph_user
+
+# TODO: Define default entrypoint to execute user scripts directly from mounted read-only folder
+# ENTRYPOINT ["python3.11", "/workspace/main_run.py"]
