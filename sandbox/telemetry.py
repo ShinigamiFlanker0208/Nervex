@@ -5,7 +5,7 @@ Injected into generated model execution scripts inside the sandbox to capture an
 exact tensor dimensionalities (e.g., [batch_size, sequence_length, hidden_dim]) layer-by-layer
 during forward passes without triggering out-of-memory overheads.
 """
-
+from sympy.codegen.ast import continue_
 
 
 def get_telemetry_tracker_code() -> str:
@@ -60,4 +60,42 @@ def inject_telemetry_wrapper(original_script: str) -> str:
     # TODO: Prepend `from telemetry_tracker import attach_tensor_tracer` to script imports.
     # TODO: Inject call `attach_tensor_tracer(model)` immediately before the execution of the forward pass.
     """
-    raise NotImplementedError("TODO: Implement code instrumentation injection routine.")
+    import re
+
+    import_line = "from telemetry_tracker import attach_tensor_tracer"
+    tracer_call = "attach_tensor_tracer(model)"
+
+    # Idempotency: already instrumented -> f(f(x)) == f(x)
+    if tracer_call in original_script:
+        return original_script
+
+    target = re.compile(r"(?:^|=|return)\s*model\(")
+
+    lines = original_script.splitlines()
+    result = []
+    attached = False
+
+    for line in lines:
+        # Attach once, at the first forward call only
+        if not attached and target.search(line):
+            leading_whitespace = re.match(r"[ \t]*", line).group(0)
+            result.append(leading_whitespace + tracer_call)
+            attached = True
+        result.append(line)
+
+    # Fail loud: the Critic must know the tracer was never attached
+    if not attached:
+        raise ValueError("inject_telemetry_wrapper: no forward call `model(...)` found in script")
+
+    # `from __future__` imports must stay the first statements
+    insert_at = 0
+    for i, line in enumerate(result):
+        if line.startswith("from __future__"):
+            insert_at = i + 1
+    if import_line not in result:
+        result.insert(insert_at, import_line)
+
+    new_text = "\n".join(result)
+    if original_script.endswith("\n"):
+        new_text += "\n"
+    return new_text
