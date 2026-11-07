@@ -5,6 +5,7 @@ Manages local embeddings for document chunks and natural language explanations o
 to enable hybrid semantic vector searches that complement graph traversals.
 """
 
+import hashlib
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 
@@ -66,7 +67,25 @@ class VectorStoreManager:
         # TODO: Format custom documents embedding both original LaTeX strings and English explanations.
         # TODO: Upsert into collection with tag `entity_class='Formula'`.
         """
-        raise NotImplementedError("TODO: Implement specialized formula explanation embedding storage.")
+        seen, ids, docs, metas = set(), [], [], []
+        for block in math_vault_summary:
+            latex = (block.get("original_latex") or "").strip()
+            if not latex or latex in seen:           # dedupe: the same formula recurs across the paper
+                continue
+            seen.add(latex)
+            kind = block.get("block_type", "unknown")
+            explanation = (block.get("explanation") or "").strip()   # optional English gloss, if one exists
+            docs.append(f"Formula ({kind}): {latex}" + (f"\nMeaning: {explanation}" if explanation else ""))
+            # content-addressed id -> re-ingesting the same paper upserts instead of duplicating
+            ids.append("formula_" + hashlib.sha1(latex.encode("utf-8")).hexdigest()[:16])
+            metas.append({
+                "entity_class": "Formula",           # Chroma metadata must be flat str/int/float/bool
+                "block_type": str(kind),
+                "token_id": str(block.get("token_id", "")),
+                "approx_line_num": int(block.get("approx_line_num", 0) or 0),
+            })
+        if ids:
+            self.collection.upsert(ids=ids, documents=docs, metadatas=metas)
 
     def similarity_search(self, query: str, n_results: int = 5, filter_metadata: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """

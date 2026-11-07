@@ -7,18 +7,21 @@ Enforces non-root execution, cgroups CPU/RAM limits, and network isolation to pr
 """
 
 import os
+import asyncio
+import json
+import shutil
 import time
 import tempfile
+from requests.exceptions import ReadTimeout, ConnectionError as RequestsConnectionError
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional
 
 # TODO: Import Docker Python SDK modules and exception classes
 import docker
 from docker.errors import DockerException, ContainerError, APIError
-from google.protobuf.internal import containers
 
 # TODO: Import telemetry injection helpers and project settings
-from sandbox.telemetry import inject_telemetry_wrapper
+from sandbox.telemetry import inject_telemetry_wrapper, get_telemetry_tracker_code
 from config import settings
 
 
@@ -71,47 +74,67 @@ class DockerSandboxController:
 
         input_lines=[]
         for var_name,shape_str in expected_inputs.items():
-            input_lines.append(f"{var_name}=torch.randn{shape_str}.cuda")
-        inputs_code="\n    ".join(input_lines)
+            input_lines.append(f"{var_name}=torch.randn{shape_str}.cuda()")
+        inputs_code="\n        ".join(input_lines)
+        inputs_dict_code="{" + ", ".join(f"{n!r}: {n}" for n in expected_inputs) + "}"
 
+        # NOTE: the template must start at column 0. Any leading indentation here becomes
+        # an IndentationError in main_run.py (and breaks the multi-line code_string too).
         harness_script=f"""
-        import torch
-        import jax
-        from telemetry_tracker import attach_tensor_tracer
-        import traceback
-        import sys
-        
-        #------------Generated Model Class-------------
-        {code_string}
-        
-        
-        #--------execution test-----------------
-        def run_test():
-            try:
-            # creating dummy tensors
-                {inputs_code}
-            
-            #--------Forward Pass-----------
-                with torch.no_grad():
-                    model_cls=None
-                    for obj in list(globals().values()):
-                        if isinstance(obj, type) and issubclass(obj, torch.nn.Module) and obj != torch.nn.Module:
-                            model_cls=obj
-                            break
-                    if model_cls is None:
-                        raise RuntimeError("No nn.Module class found in generated code!")
-                
-                    model=model_cls().cuda()
-                    output=model(x)
-                    print("Executing forward pass success")
+import torch
+import jax
+from telemetry_tracker import attach_tensor_tracer, shape_log
+import json
+import traceback
+import sys
 
-            except Exception as e:
-                print("execution error")
-                traceback.print_exc()
-            
-        if __name__ == "__main__":
-            run_test()
-            """
+#------------Generated Model Class-------------
+{code_string}
+
+
+#--------execution test-----------------
+def run_test():
+    try:
+        # creating dummy tensors
+        {inputs_code}
+
+        #--------Forward Pass-----------
+        with torch.no_grad():
+            # Candidates = nn.Module subclasses DEFINED in this script (not imported ones like
+            # `from torch.nn import Linear`, which also sit in globals()). Definition order is
+            # preserved, and a top-level model is defined after its sub-blocks, so take the LAST.
+            candidates=[o for o in globals().values()
+                        if isinstance(o, type) and issubclass(o, torch.nn.Module)
+                        and o is not torch.nn.Module and o.__module__ == "__main__"]
+            if not candidates:
+                raise RuntimeError("No nn.Module class found in generated code!")
+            model_cls=candidates[-1]
+
+            model=model_cls().cuda()
+            # Feed ALL expected inputs. By keyword when every name is a forward() parameter,
+            # otherwise positionally in the declared order.
+            import inspect
+            _inputs={inputs_dict_code}
+            _params=set(inspect.signature(model.forward).parameters)
+            if _inputs and all(n in _params for n in _inputs):
+                _args, _kwargs = (), _inputs
+            else:
+                _args, _kwargs = tuple(_inputs.values()), {{}}
+            # ONE call site on purpose: inject_telemetry_wrapper attaches the tracer before the
+            # first `model(` it finds, so a second call in another branch would run untraced.
+            output=model(*_args, **_kwargs)
+            print("Executing forward pass success")
+            # /tmp is a tmpfs that dies with the container, so ship the traces via stdout.
+            print("NERVEX_TRACES=" + json.dumps(shape_log))
+
+    except Exception as e:
+        print("execution error")
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    run_test()
+"""
         return harness_script
 
     def run_sandbox_execution(self, code_string: str, expected_inputs: Dict[str, str]) -> Tuple[bool, Dict[str, Any]]:
@@ -141,51 +164,79 @@ class DockerSandboxController:
         # TODO: Step 6: Collect stdout, stderr, and generated telemetry JSON files from tmpfs before container cleanup (`remove=True`).
         # TODO: Return formatted structured log result.
         """
+        # Step 1: harness + telemetry injection (pure str -> str, raises ValueError if no `model(`)
         harness=self._generate_execution_harness(code_string, expected_inputs)
+        harness=inject_telemetry_wrapper(harness)
+
+        logs=""
+        traces: Dict[str, Any] = {}
+        success=False
         temp_dir=tempfile.mkdtemp()
 
         try:
-            file_path=Path(temp_dir)/"main_run.py"
-
-            file_path.write_text(harness)
+            # Step 2: stage both scripts. The container user (1000) must be able to read them.
+            os.chmod(temp_dir, 0o755)
+            (Path(temp_dir)/"main_run.py").write_text(harness)
+            (Path(temp_dir)/"telemetry_tracker.py").write_text(get_telemetry_tracker_code())
 
             container=self.client.containers.run(
-                "pytorch/pytorch:latest",
+                settings.DOCKER_SANDBOX_IMAGE,
                 "python /workspace/main_run.py",
                 volumes={temp_dir: {"bind": "/workspace", "mode": "ro"}},
+                tmpfs={"/tmp": "size=64m,mode=1777"},
+                environment={"HOME": "/tmp", "PYTHONDONTWRITEBYTECODE": "1"},
+                user="1000:1000",
                 network_mode="none",
                 cap_drop=["ALL"],
-                mem_limit="4096m",
+                mem_limit=f"{settings.CONTAINER_MEMORY_LIMIT_MB}m",
                 detach=True,
                 device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])]
                 if self.has_gpu_runtime else None)
 
+            try:
+                result=container.wait(timeout=settings.CONTAINER_TIMEOUT_SECONDS)
+                status_code=result.get("StatusCode",1)
+            except (ReadTimeout, RequestsConnectionError):
+                # wait() timing out does NOT stop the container; we must kill it ourselves.
+                container.kill()
+                status_code=124
+                logs="TIMEOUT: container exceeded "+str(settings.CONTAINER_TIMEOUT_SECONDS)+"s and was killed\n"
 
+            logs+=container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
 
-            result=container.wait(timeout=30)
+            # Step 6: traces travel via stdout (tmpfs is gone once the container stops)
+            for line in logs.splitlines():
+                if line.startswith("NERVEX_TRACES="):
+                    traces=json.loads(line[len("NERVEX_TRACES="):])
 
-
-            logs=container.logs(stdout=True, stderr=True).decode("utf-8")
-
-            status_code=result.get("StatusCode",1)
-
-            success= (status_code==0) and ("execute error" not in logs.lower())
+            success= (status_code==0) and ("execution error" not in logs.lower())
 
         except DockerException as exc:
             success=False
+            logs+=f"\nDOCKER ERROR: {exc}"
             print(f"Container failed: {exc}")
-            if "container" in locals():
-                container.kill()
         finally:
             if "container" in locals():
                 container.remove(force=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-        return success,{"logs":logs}
+        return success,{"logs":logs, "tensor_traces":traces}
 
 
 # =====================================================================
 # LangGraph Sandbox Node Interface
 # =====================================================================
+
+_controller: Optional[DockerSandboxController] = None
+
+
+def _get_controller() -> DockerSandboxController:
+    """One controller per process: __init__ runs a GPU probe container, too slow per node call."""
+    global _controller
+    if _controller is None:
+        _controller = DockerSandboxController()
+    return _controller
+
 
 async def execute_script_in_sandbox(state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -202,20 +253,20 @@ async def execute_script_in_sandbox(state: Dict[str, Any]) -> Dict[str, Any]:
     # TODO: If successful, return partial state with execution_status="SUCCESS" and extracted tensor_shape_traces.
     # TODO: If failed, construct ExecutionErrorTrace dictionary and return in `execution_logs` list with status="RUNTIME_ERROR".
     """
-    controller=DockerSandboxController()
-    print("--- [Sandbox Executor] Launching secure container execution on local GPU ---")
-    print("[Sandbox Executor] Mock Sandbox Execution - Assuming SUCCESS for UI demonstration")
-
+    controller=_get_controller()
+    print("--- [Sandbox Executor] Launching secure container execution ---")
 
     code=state.get("current_code","")
     inputs=state.get("expected_inputs",{})
 
-    success, result_dict = controller.run_sandbox_execution(code, inputs)
+    # docker-py is blocking; keep the event loop (FastAPI) responsive.
+    success, result_dict = await asyncio.to_thread(controller.run_sandbox_execution, code, inputs)
     logs = result_dict.get("logs", "")
 
 
     if success:
-        return {"execution_status": "SUCCESS", "execution_logs": [{"status": "SUCCESS", "traceback": ""}]}
+        return {"execution_status": "SUCCESS", "execution_logs": [{"status": "SUCCESS", "traceback": ""}],
+                "tensor_shape_traces": result_dict.get("tensor_traces", {})}
     else:
         return {"execution_status": "RUNTIME_ERROR", "execution_logs": [{"status": "RUNTIME_ERROR", "traceback": logs}]}
 

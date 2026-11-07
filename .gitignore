@@ -3,4 +3,10 @@
 uploads/
 execution_artifacts/
 __pycache__/
-.gradio/
+.env.*
+!.env.example
+.pytest_cache/
+*.egg-info/
+data/chromadb/
+.idea/
+.DS_Store

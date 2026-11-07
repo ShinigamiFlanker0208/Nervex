@@ -1,140 +1,226 @@
 """
 FastAPI Router Endpoint Definitions
 
-Exposes HTTP API endpoints for frontend interaction, wiring user request schemas
-to backend ingestion engines, LangGraph orchestrators, sandbox executors, and explainer models.
+Exposes HTTP API endpoints for frontend interaction, wiring typed request schemas
+to ingestion, the LangGraph orchestrator, the sandbox, and the explainer / feature engines.
+
+Contracts at the boundary (senior principle): every body is a Pydantic model, every heavy
+dependency comes from `api.deps` (lazy + monkeypatchable), every failure maps to a real HTTP code.
 """
-
-import shutil
+import logging
+import uuid
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict
 
-from fastapi import APIRouter, UploadFile, File, Form, Depends, HTTPException, status
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
 
-# TODO: Import Pydantic API transmission schemas
-# from api.schemas import (
-#     IngestionResponse,
-#     KnowledgeGraphQueryRequest, GraphNeighborhoodResponse,
-#     CodeGenerationRequest, CodeGenerationResponse,
-#     ExplainerChatRequest, ExplainerChatResponse,
-#     AblationStudyRequest, AblationStudyResponse,
-#     TranspilationRequest, TranspilationResponse
-# )
+from api import deps
+from api.jobs import jobs
+from api.schemas import (
+    AblationStudyRequest, AblationStudyResponse,
+    CodeGenerationRequest, CodeGenerationResponse,
+    ExplainerChatRequest, ExplainerChatResponse,
+    GraphNeighborhoodResponse, IngestionJobAccepted, IngestionJobStatus,
+    KnowledgeGraphQueryRequest,
+    TranspilationRequest, TranspilationResponse,
+)
+from config import settings
 
-# TODO: Import core engines and services
-# from ingestion.pdf_parser import PDFIngestionEngine
-# from ingestion.math_masker import MathMasker
-# from ingestion.semantic_chunker import SemanticChunker
-# from ingestion.ontology_extractor import OntologyExtractor
-# from db.graph_db import Neo4jGraphManager
-# from db.vector_db import VectorStoreManager
-# from agents.graph import SoulGraphOrchestrator
-# from explainer.chat_agent import ExplainerChatAgent
-# from features.ablation import AblationStudyController
-# from features.transpilation import FrameworkTranspiler
-# from config import settings
-
+log = logging.getLogger("nervex.api")
 router = APIRouter(tags=["SoulGraph Endpoints"])
 
 
 # =====================================================================
-# Phase 1: Document Ingestion & Knowledge Graph Router Endpoints
+# Phase 1: Document Ingestion & Knowledge Graph
 # =====================================================================
 
-@router.post("/ingest/pdf", summary="Upload and parse research paper PDF into Knowledge Graph")
-async def ingest_academic_pdf(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """
-    Ingests uploaded PDF file, runs deep learning OCR, masks LaTeX math expressions,
-    chunks text semantically, executes structured Pydantic extraction via LLM, and persists to Neo4j/ChromaDB.
-    
-    # TODO: Validate uploaded file extension (.pdf).
-    # TODO: Save uploaded stream to temporary destination (`settings.UPLOAD_DIR`).
-    # TODO: Execute pipeline: PDFIngestionEngine -> MathMasker -> SemanticChunker -> OntologyExtractor.
-    # TODO: Write extracted graph schema to Neo4jGraphManager and text embeddings to VectorStoreManager.
-    # TODO: Return IngestionResponse schema dictionary.
-    """
-    if not file.filename.endswith(".pdf"):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF file format supported.")
-    
-    print(f"--- [API Router] Received file ingestion upload: {file.filename} ---")
-    # TODO: Implement complete ingestion workflow binding here
-    raise NotImplementedError("TODO: Implement /ingest/pdf router endpoint logic.")
+def _run_ingestion(job_id: str, pdf_path: Path) -> None:
+    """Background worker (sync -> FastAPI runs it in a threadpool). Never raises: errors land in the job."""
+    from ingestion.pipeline import ingest_pdf
+
+    jobs.update(job_id, state="running")
+    try:
+        with deps.ingestion_lock:  # one OCR+LLM ingestion at a time (GPU/VRAM, API rate limits)
+            result = ingest_pdf(
+                pdf_path,
+                parser=deps.get_pdf_parser(),
+                masker=deps.get_masker(),
+                chunker=deps.get_chunker(),
+                extractor=deps.get_extractor(),
+                graph_db=deps.get_graph_db(),
+                vector_db=deps.get_vector_db(),
+                on_progress=lambda m: jobs.log(job_id, m),
+            )
+        jobs.update(job_id, state="done", result=result)
+    except Exception as exc:  # fail loud into the job record, with the type for debugging
+        log.exception("ingestion failed")
+        jobs.update(job_id, state="failed", error=f"{type(exc).__name__}: {exc}")
 
 
-@router.post("/graph/query", summary="Query Neo4j Knowledge Graph neighborhood or architecture lineage")
-async def query_knowledge_graph(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Retrieves surrounding nodes and relationship edges centered around a target architecture block or formula.
-    
-    # TODO: Parse input via KnowledgeGraphQueryRequest schema.
-    # TODO: Call Neo4jGraphManager.query_graph_neighborhood(request.node_id, request.depth).
-    # TODO: Format output using GraphNeighborhoodResponse schema.
-    """
-    raise NotImplementedError("TODO: Implement /graph/query router endpoint.")
+@router.post("/ingest/pdf", status_code=status.HTTP_202_ACCEPTED, response_model=IngestionJobAccepted,
+             summary="Upload a research paper PDF; returns a job to poll")
+async def ingest_academic_pdf(background: BackgroundTasks, file: UploadFile = File(...)) -> IngestionJobAccepted:
+    filename = file.filename or ""
+    if not filename.lower().endswith(".pdf"):
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Only .pdf files are supported.")
+
+    # Never trust the client filename for the path (traversal): store under a random name.
+    settings.UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    dest = settings.UPLOAD_DIR / f"{uuid.uuid4().hex}.pdf"
+    limit = settings.MAX_UPLOAD_MB * 1024 * 1024
+    size, first = 0, b""
+    try:
+        with open(dest, "wb") as out:
+            while chunk := await file.read(1 << 20):
+                if not first:
+                    first = chunk[:5]
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                                        f"File exceeds {settings.MAX_UPLOAD_MB} MB.")
+                out.write(chunk)
+        if not first.startswith(b"%PDF"):  # extension is not proof; check magic bytes
+            raise HTTPException(status.HTTP_400_BAD_REQUEST, "File is not a valid PDF.")
+    except HTTPException:
+        dest.unlink(missing_ok=True)
+        raise
+
+    job_id = jobs.create(filename)
+    background.add_task(_run_ingestion, job_id, dest)
+    return IngestionJobAccepted(job_id=job_id, status_url=f"/api/v1/ingest/status/{job_id}")
+
+
+@router.get("/ingest/status/{job_id}", response_model=IngestionJobStatus, summary="Poll an ingestion job")
+async def ingestion_status(job_id: str) -> Dict[str, Any]:
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown job_id.")
+    return job
+
+
+@router.post("/graph/query", response_model=GraphNeighborhoodResponse,
+             summary="Query the Neo4j knowledge graph around a node")
+async def query_knowledge_graph(request: KnowledgeGraphQueryRequest) -> GraphNeighborhoodResponse:
+    if not request.node_id:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "node_id is required.")
+    import asyncio
+    try:
+        sub = await asyncio.to_thread(deps.get_graph_db().query_graph_neighborhood, request.node_id, request.depth)
+    except Exception as exc:
+        log.exception("graph query failed")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Graph database error: {type(exc).__name__}")
+    return GraphNeighborhoodResponse(center_node_id=request.node_id, nodes=sub["nodes"], edges=sub["edges"])
 
 
 # =====================================================================
-# Phase 2 & 3: Autonomous Code Generation & Sandbox Execution Router Endpoints
+# Phase 2 & 3: Code Generation + Sandbox
 # =====================================================================
 
-@router.post("/generate/code", summary="Trigger cyclic multi-agent code translation and secure execution")
-async def generate_and_execute_code(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Orchestrates the LangGraph loop (Researcher -> Architect -> Coder <-> Critic) to produce PyTorch/JAX code,
-    executes dummy forward runs inside ephemeral Docker sandbox, captures telemetry, and returns verified code.
-    
-    # TODO: Validate input with CodeGenerationRequest schema.
-    # TODO: Instantiate SoulGraphOrchestrator and trigger run_translation_loop().
-    # TODO: Monitor state until convergence or MAX_EXECUTION_ATTEMPTS reached.
-    # TODO: Extract tensor shape traces and execution logs from terminal state.
-    # TODO: Return structured CodeGenerationResponse schema.
-    """
-    print(f"--- [API Router] Triggering translation graph for component: {request.get('target_component')} ---")
-    raise NotImplementedError("TODO: Implement /generate/code router endpoint.")
+def initial_state_for(req: CodeGenerationRequest) -> Dict[str, Any]:
+    return {
+        "paper_id": req.paper_id,
+        "target_component": req.target_component,
+        "target_framework": req.target_framework,
+        "paper_context": {},
+        "relevant_formulas": [],
+        "hyperparameters": {},
+        "structural_skeleton": "",
+        "expected_inputs": {},
+        "current_code": "",
+        "attempt_count": 0,
+        "execution_status": "PENDING",
+        "critic_feedback": "",
+        "execution_logs": [],
+        "tensor_shape_traces": {},
+    }
+
+
+@router.post("/generate/code", response_model=CodeGenerationResponse,
+             summary="Run the Researcher->Architect->Coder->Sandbox->Critic loop")
+async def generate_and_execute_code(request: CodeGenerationRequest) -> CodeGenerationResponse:
+    async with deps.generation_lock:  # one GPU sandbox pipeline at a time
+        orchestrator = deps.get_orchestrator()
+        final = await orchestrator.run_translation_loop(initial_state_for(request))
+    return CodeGenerationResponse(
+        paper_id=request.paper_id,
+        target_component=request.target_component,
+        target_framework=request.target_framework,
+        generated_code=final.get("current_code", ""),
+        attempt_count=final.get("attempt_count", 0),
+        execution_status=final.get("execution_status", "UNKNOWN"),
+        tensor_shape_traces=final.get("tensor_shape_traces", {}) or {},
+        error_logs=final.get("execution_logs", []) or [],
+    )
 
 
 # =====================================================================
-# Phase 4: Interactive Explainer Chat Router Endpoints
+# Phase 4: Explainer Chat
 # =====================================================================
 
-@router.post("/explainer/chat", summary="Query tool-calling Explainer Chat on highlighted code")
-async def chat_explain_code(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Accepts user questions regarding highlighted lines of code, invokes AST parser tools to trace mathematical origin,
-    and returns rich explanatory markdown grounded directly in original research paper theory.
-    
-    # TODO: Parse input via ExplainerChatRequest schema.
-    # TODO: Pass parameters into ExplainerChatAgent.answer_user_query().
-    # TODO: Return formatted ExplainerChatResponse schema containing markdown answers and cited Graph Node IDs.
-    """
-    raise NotImplementedError("TODO: Implement /explainer/chat router endpoint.")
+@router.post("/explainer/chat", response_model=ExplainerChatResponse,
+             summary="Ask about highlighted generated code, grounded in the paper")
+async def chat_explain_code(request: ExplainerChatRequest) -> ExplainerChatResponse:
+    if request.highlighted_line_end < request.highlighted_line_start:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "highlighted_line_end < highlighted_line_start.")
+    result = await deps.get_explainer().explain(
+        request.user_question,
+        (request.highlighted_line_start, request.highlighted_line_end),
+        request.current_code_script,
+        request.chat_history,
+    )
+    return ExplainerChatResponse(**result)
 
 
 # =====================================================================
-# Advanced Bonus Features: Ablation & Transpilation Endpoints
+# Advanced features
 # =====================================================================
 
-@router.post("/features/ablation", summary="Execute architectural ablation study and compare runtime logs")
-async def run_ablation_experiment(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Triggers architectural mutation (e.g. 'Remove residual connections'), re-compiles code in sandbox,
-    and returns comparative FLOPs/memory execution charts between baseline and ablated variants.
-    
-    # TODO: Parse input via AblationStudyRequest schema.
-    # TODO: Call AblationStudyController.run_ablation_experiment().
-    # TODO: Return comparative AblationStudyResponse schema.
-    """
-    raise NotImplementedError("TODO: Implement /features/ablation router endpoint.")
+@router.post("/features/ablation", response_model=AblationStudyResponse,
+             summary="Mutate a working architecture, re-run in the sandbox, compare")
+async def run_ablation_experiment(request: AblationStudyRequest) -> AblationStudyResponse:
+    from features.ablation import AblationStudyController
+    from sandbox.docker_controller import execute_script_in_sandbox
+    # A baseline is only trustworthy if it ACTUALLY passes the sandbox. Verify it for real
+    # (this also produces the baseline tensor-shape telemetry we compare against).
+    async with deps.generation_lock:
+        check = await execute_script_in_sandbox(
+            {"current_code": request.baseline_code, "expected_inputs": request.expected_inputs})
+    if check.get("execution_status") != "SUCCESS":
+        tb = (check.get("execution_logs") or [{}])[-1].get("traceback", "")
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Baseline failed the sandbox:\n{tb[-1500:]}")
+    baseline_state = {
+        **initial_state_for(CodeGenerationRequest(paper_id=request.paper_id, target_component=request.target_component)),
+        "current_code": request.baseline_code,
+        "expected_inputs": request.expected_inputs,
+        "execution_status": "SUCCESS",
+        "tensor_shape_traces": check.get("tensor_shape_traces", {}),
+    }
+    async with deps.generation_lock:
+        controller = AblationStudyController(deps.get_orchestrator(), sandbox_controller=None)
+        try:
+            report = await controller.run_ablation_experiment(baseline_state, request.mutation_prompt)
+        except ValueError as exc:
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    return AblationStudyResponse(
+        mutation_prompt=request.mutation_prompt,
+        baseline_code=request.baseline_code,
+        ablated_code=report["mutated_code"],
+        baseline_metrics=report["baseline_metrics"],
+        ablated_metrics=report["ablated_metrics"],
+        diff_explanation=report["diff_summary"],
+    )
 
 
-@router.post("/features/transpile", summary="Instant PyTorch <-> JAX framework transpilation")
-async def transpile_model_framework(request: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Translates stateful object-oriented PyTorch nn.Module structures into clean, stateless JAX/Equinox functions.
-    
-    # TODO: Parse input via TranspilationRequest schema.
-    # TODO: Invoke FrameworkTranspiler.transpile_model().
-    # TODO: Return syntax verified TranspilationResponse schema.
-    """
-    raise NotImplementedError("TODO: Implement /features/transpile router endpoint.")
+@router.post("/features/transpile", response_model=TranspilationResponse,
+             summary="PyTorch <-> JAX/Equinox transpilation")
+async def transpile_model_framework(request: TranspilationRequest) -> TranspilationResponse:
+    try:
+        out = await deps.get_transpiler().transpile_model(
+            request.source_code, request.source_framework, request.target_framework, request.architecture_skeleton
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
+    return TranspilationResponse(
+        source_framework=out["source_framework"], target_framework=out["target_framework"],
+        transpiled_code=out["transpiled_code"], syntax_valid=out["syntax_valid"], notes=out["notes"],
+    )

@@ -1,38 +1,32 @@
-# SoulGraph Ephemeral Sandbox Docker Image Architecture
-# Minimal, hardened Ubuntu image pre-configured with NVIDIA CUDA, PyTorch, and execution dependencies.
+# SoulGraph Ephemeral Sandbox Image
+# Why: AI-generated code is untrusted. This image is the ONLY thing it runs inside.
+# Deps are baked in at build time because the container runs with network_mode="none".
+#
+# Build:  docker build -f sandbox/Dockerfile.sandbox -t soulgraph-runtime:latest .
+# (tag must match settings.DOCKER_SANDBOX_IMAGE)
 
-# TODO: Specify appropriate base CUDA developer image (e.g., nvidia/cuda:12.1.1-runtime-ubuntu22.04)
-# FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04
+# Pinned base: reproducible. `:latest` would silently change torch under us.
+FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
 
-# TODO: Set environment variables to eliminate interactive timezone/apt prompts and force Python unbuffered I/O
-# ENV DEBIAN_FRONTEND=noninteractive \
-#     PYTHONUNBUFFERED=1 \
-#     PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
 
-# TODO: Install Python 3.11, pip, build utilities, and security hardening packages
-# RUN apt-get update && apt-get install -y --no-install-recommends \
-#     python3.11 \
-#     python3-pip \
-#     && rm -rf /var/lib/apt/lists/*
+# Whitelist from CriticAgent.run_static_analysis: torch, jax, equinox, einops, numpy.
+# The harness does `import jax` unconditionally, so it must exist (CPU build is enough:
+# JAX code only needs to trace/run a dummy forward pass).
+RUN pip install \
+        "jax==0.4.30" "jaxlib==0.4.30" \
+        "equinox==0.11.4" \
+        "einops==0.8.0" \
+        "numpy<2"
 
-# TODO: Create dedicated non-root user and group (`soulgraph_user:1000`) for privilege isolation
-# RUN groupadd -g 1000 soulgraph_group && \
-#     useradd -u 1000 -g soulgraph_group -m -s /bin/bash soulgraph_user
+# Non-root user matching `user="1000:1000"` in docker_controller.
+RUN groupadd -g 1000 soulgraph_group && \
+    useradd -u 1000 -g soulgraph_group -m -s /bin/bash soulgraph_user
 
-# TODO: Pre-install core backend tensor computing libraries (PyTorch with CUDA, JAX, Equinox, Einops, NumPy)
-# RUN pip3 install --no-cache-dir \
-#     torch==2.3.0 --index-url https://download.pytorch.org/whl/cu121 \
-#     jax[cuda12] \
-#     equinox \
-#     einops \
-#     numpy
+WORKDIR /workspace
+USER soulgraph_user
 
-# TODO: Configure working directory and permissions
-# WORKDIR /workspace
-# RUN chown -R soulgraph_user:soulgraph_group /workspace
-
-# TODO: Switch execution authority to non-root user
-# USER soulgraph_user
-
-# TODO: Define default entrypoint to execute user scripts directly from mounted read-only folder
-# ENTRYPOINT ["python3.11", "/workspace/main_run.py"]
+# The controller supplies the command; this is only a safe default.
+CMD ["python", "/workspace/main_run.py"]

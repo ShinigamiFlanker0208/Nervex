@@ -5,6 +5,7 @@ Responsible for ingesting dense academic ML PDFs, prioritizing table extraction,
 and preserving Markdown headers cleanly without loss of document hierarchy.
 """
 
+import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from marker.converters.pdf import PdfConverter
@@ -82,4 +83,35 @@ class PDFIngestionEngine:
         Secondary pass to securely extract standalone model diagrams and comparison tables.
         # TODO: Implement cropping and saving of figures to output_dir for potential Vision-RAG processing.
         """
-        raise NotImplementedError("TODO: Implement table and image graphic extraction.")
+        rendered = PdfConverter(artifact_dict=self.models)(str(pdf_path))
+        text, _, images = text_from_rendered(rendered)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        results: List[Dict[str, Any]] = []
+        for name, img in (images or {}).items():
+            safe = Path(str(name)).name            # never let an OCR-derived name escape output_dir
+            dest = output_dir / safe
+            img.save(dest)
+            results.append({"type": "figure", "name": safe, "path": str(dest)})
+        for i, table_md in enumerate(self.extract_markdown_tables(text)):
+            results.append({"type": "table", "name": f"table_{i:03d}", "markdown": table_md})
+        return results
+
+    @staticmethod
+    def extract_markdown_tables(markdown: str) -> List[str]:
+        """
+        Pure helper (testable without OCR models): pull GitHub-style pipe tables out of markdown.
+        A table = a run of `|...|` lines whose 2nd line is a separator row like `|---|:--:|`.
+        """
+        sep = re.compile(r"^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$")
+        lines, tables, i = markdown.splitlines(), [], 0
+        while i < len(lines):
+            if "|" in lines[i] and i + 1 < len(lines) and "|" in lines[i + 1] and sep.match(lines[i + 1]):
+                j = i + 2
+                while j < len(lines) and "|" in lines[j]:
+                    j += 1
+                tables.append("\n".join(lines[i:j]))
+                i = j
+            else:
+                i += 1
+        return tables

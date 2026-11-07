@@ -44,9 +44,14 @@ class Settings(BaseSettings):
     DOCKER_SANDBOX_IMAGE: str = "soulgraph-runtime:latest"
     MAX_EXECUTION_ATTEMPTS: int = 5
     CONTAINER_TIMEOUT_SECONDS: int = 300
+    TRANSLATION_TIMEOUT_SECONDS: float = 1800.0  # whole LangGraph loop (LLM thinking + up to 5 sandbox runs)
+    CORS_ORIGINS: List[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:7860"]
     CONTAINER_MEMORY_LIMIT_MB: int = 4096
     CONTAINER_CPU_QUOTA: int = 100000  # Default cgroups CPU cap
     ENABLE_GPU_PASSTHRU: bool = True
+    MAX_UPLOAD_MB: int = 50
+    API_HOST: str = "127.0.0.1"  # loopback by default: this API can run code on your GPU
+    API_PORT: int = 8000
     
     # Directories
     BASE_DIR: Path = Path(__file__).parent.resolve()

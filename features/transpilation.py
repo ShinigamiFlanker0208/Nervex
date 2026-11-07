@@ -6,6 +6,7 @@ object-oriented PyTorch modules (`nn.Module`) into clean, stateless functional J
 instantly at the toggle of a button in the frontend UI.
 """
 
+import re
 from typing import Dict, Any, Optional
 
 # TODO: Import LLM translation chains and syntax validators
@@ -19,40 +20,76 @@ class FrameworkTranspiler:
     Translates validated backend model architectures between stateful PyTorch and stateless JAX paradigms.
     """
 
-    def __init__(self, model_provider: str = "gemini"):
-        """
-        Initializes expert transpilation LLM prompts explicitly trained on JAX functional patterns.
-        # TODO: Initialize specialized transpilation prompt chain.
-        # TODO: Instantiate CriticAgent to run static syntax checking on transpiled script.
-        """
+    SYSTEM_PROMPT = (
+        "You are an expert in both PyTorch and JAX/Equinox. Translate the given model faithfully, "
+        "preserving the math exactly. Rules:\n"
+        "- PyTorch nn.Module <-> equinox.Module (parameters are explicit pytree leaves).\n"
+        "- Stateful init -> explicit jax.random.PRNGKey passing (split keys, never reuse one).\n"
+        "- Data-dependent Python `if` on array values -> jax.lax.cond / jnp.where.\n"
+        "- Keep EVERY `# Implements: <Node_ID: ...>` and `# [B, S, D] -> ...` comment verbatim.\n"
+        "- Only import: torch, jax, equinox, einops, numpy, math, typing.\n"
+        "Return ONLY the complete code in one ```python block, then a short '### Notes' list."
+    )
+
+    def __init__(self, model_provider: str = "nvidia", llm: Any = None, critic: Any = None):
+        """`llm` and `critic` are injectable for tests; defaults match the rest of Nervex (ChatNVIDIA)."""
         self.provider = model_provider
-        # TODO: Setup transpiler chain
-        raise NotImplementedError("TODO: Implement Transpiler initialization and prompt configurations.")
+        if llm is None:
+            from langchain_nvidia_ai_endpoints import ChatNVIDIA
+            llm = ChatNVIDIA(model="nvidia/nemotron-3-ultra-550b-a55b", temperature=0.1, max_tokens=8192)
+        self.llm = llm
+        self._critic = critic  # built lazily: only static analysis is needed
+
+    @staticmethod
+    def normalize_framework(name: str) -> str:
+        n = name.strip().lower()
+        if n.startswith("jax") or "equinox" in n:
+            return "JAX"
+        if n.startswith("torch") or n.startswith("pytorch"):
+            return "PyTorch"
+        raise ValueError(f"Unsupported framework: {name!r} (expected 'PyTorch' or 'JAX')")
+
+    def _static_check(self, code: str):
+        if self._critic is None:
+            from agents.critic import CriticAgent
+            self._critic = CriticAgent()
+        return self._critic.run_static_analysis(code)
+
+    @staticmethod
+    def _split_reply(text: str):
+        m = re.search(r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE)
+        code = m.group(1).strip() if m else ""
+        notes = text[m.end():].strip() if m else text.strip()
+        return code, notes
 
     async def transpile_model(self, source_code: str, source_framework: str, target_framework: str, architecture_skeleton: str) -> Dict[str, Any]:
         """
         Converts full model source code from source framework to target framework while preserving math precision.
-        
-        Args:
-            source_code (str): Validated source code in original framework.
-            source_framework (str): "PyTorch" or "JAX".
-            target_framework (str): Target desired framework ("JAX" or "PyTorch").
-            architecture_skeleton (str): High-level architectural blueprint with explicit `# [B, S, D] -> ...` shape annotations.
-            
-        Returns:
-            Dict[str, Any]: Payload containing `transpiled_code`, `target_framework`, and `transpilation_notes`.
-            
-        # TODO: Check if source_framework and target_framework are identical; return early if so.
-        # TODO: Construct specialized transpilation prompt feeding `source_code` and `architecture_skeleton`.
-        # TODO: Instruct model on specific framework mapping rules:
-        #       - PyTorch `nn.Module` -> JAX `equinox.Module`.
-        #       - Stateful parameter tensors -> Explicit random PRNG key passing (`jax.random.PRNGKey`).
-        #       - Dynamic control flow (`if x.sum() > 0`) -> Static JAX conditional (`jax.lax.cond`).
-        #       - Preservation of all `# Implements: <Node_ID: Eq_3>` tracking comments.
-        # TODO: Execute LLM transpilation inference.
-        # TODO: Verify syntax using CriticAgent.run_static_analysis().
-        # TODO: Return transpiled result bundle.
+        Returns: dict with `transpiled_code`, `source_framework`, `target_framework`, `syntax_valid`, `notes`.
         """
         print(f"--- [Transpiler Engine] Converting architecture from {source_framework} -> {target_framework} ---")
-        # TODO: Implement framework conversion logic here
-        raise NotImplementedError("TODO: Implement PyTorch <-> JAX framework transpilation engine.")
+        src, dst = self.normalize_framework(source_framework), self.normalize_framework(target_framework)
+        if src == dst:
+            return {"transpiled_code": source_code, "source_framework": src, "target_framework": dst,
+                    "syntax_valid": True, "notes": "Source and target frameworks are identical; returned unchanged."}
+
+        user_msg = (f"Translate from {src} to {dst}.\n\nArchitecture skeleton:\n{architecture_skeleton}\n\n"
+                    f"Source code:\n```python\n{source_code}\n```")
+        messages = [("system", self.SYSTEM_PROMPT), ("human", user_msg)]
+
+        code, notes, valid, msg = "", "", False, ""
+        for attempt in range(2):  # one repair round using the static-analysis message
+            reply = await self.llm.ainvoke(messages)
+            code, notes = self._split_reply(reply.content if isinstance(reply.content, str) else str(reply.content))
+            if not code:
+                valid, msg = False, "model returned no ```python block"
+            else:
+                valid, msg = self._static_check(code)
+            if valid:
+                break
+            messages = messages + [("ai", reply.content if isinstance(reply.content, str) else str(reply.content)),
+                                   ("human", f"That failed static analysis: {msg}. Return the corrected full code.")]
+
+        note_text = notes if valid else f"STATIC ANALYSIS FAILED: {msg}\n{notes}"
+        return {"transpiled_code": code, "source_framework": src, "target_framework": dst,
+                "syntax_valid": valid, "notes": note_text}

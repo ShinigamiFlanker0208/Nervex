@@ -217,3 +217,21 @@ class Neo4jGraphManager:
                 lineage_paths.append(ordered_nodes)
                 
         return lineage_paths
+
+    def search_nodes(self, keyword: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """
+        Case-insensitive lookup of entities by name / node_id (user text -> real graph ids).
+
+        Why: callers hold free text ("SwiGLU Activation") but the graph is keyed by snake_case
+        ids ('swiglu_activation'). Exact-id lookups silently return nothing, so resolve first.
+        Fully parameterised (no string interpolation of user text into Cypher).
+        """
+        cypher = """
+        MATCH (n:Entity)
+        WHERE toLower(n.name) CONTAINS toLower($kw) OR toLower(n.node_id) CONTAINS toLower($kw)
+        RETURN n.node_id AS node_id, n.name AS name, n.entity_type AS entity_type
+        ORDER BY size(n.node_id) ASC
+        LIMIT $limit
+        """
+        with self.driver.session() as session:
+            return [dict(r) for r in session.run(cypher, kw=keyword, limit=int(limit))]

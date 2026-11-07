@@ -126,7 +126,7 @@ class SoulGraphOrchestrator:
         try:
             final_state = await asyncio.wait_for(
                 self.workflow.ainvoke(initial_state, config=config),
-                timeout=60.0
+                timeout=settings.TRANSLATION_TIMEOUT_SECONDS
             )
             if "execution_status" not in final_state:
                 raise ValueError("Catastrophic state breakdown: Missing execution_status")

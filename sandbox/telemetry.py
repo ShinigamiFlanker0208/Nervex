@@ -5,7 +5,6 @@ Injected into generated model execution scripts inside the sandbox to capture an
 exact tensor dimensionalities (e.g., [batch_size, sequence_length, hidden_dim]) layer-by-layer
 during forward passes without triggering out-of-memory overheads.
 """
-from sympy.codegen.ast import continue_
 
 
 def get_telemetry_tracker_code() -> str:

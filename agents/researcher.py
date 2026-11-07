@@ -8,6 +8,7 @@ required before architectural generation begins.
 
 from typing import Dict, Any, List
 import json
+import re
 
 # TODO: Import State schema
 from agents.state import SoulGraphState
@@ -16,6 +17,11 @@ from agents.state import SoulGraphState
 from db.graph_db import Neo4jGraphManager
 from db.vector_db import VectorStoreManager
 from config import settings
+
+
+def slugify_node_id(text: str) -> str:
+    """'SwiGLU Activation' -> 'swiglu_activation' (the id convention the extractor enforces)."""
+    return re.sub(r"[^a-z0-9]+", "_", (text or "").lower()).strip("_")
 
 
 class ResearcherAgent:
@@ -37,6 +43,24 @@ class ResearcherAgent:
             collection_name=settings.COLLECTION_NAME
         )
 
+    def _neighborhood_for(self, target: str) -> Dict[str, Any]:
+        """
+        Resolve free text to real graph ids, then merge their depth-2 neighbourhoods.
+        Order: exact slug id -> name/id substring search (top 3). Empty graph -> empty result,
+        and the vector search still supplies context.
+        """
+        ids = [slugify_node_id(target)]
+        try:
+            ids += [h["node_id"] for h in self.graph_db.search_nodes(target, limit=3)]
+        except Exception as exc:  # a graph hiccup must not kill the whole run
+            print(f"[Researcher] node search failed: {type(exc).__name__}: {exc}")
+        nodes: Dict[str, Any] = {}
+        for node_id in dict.fromkeys(i for i in ids if i):
+            sub = self.graph_db.query_graph_neighborhood(node_id, depth=2)
+            for n in sub.get("nodes", []):
+                nodes.setdefault(n["id"], n)
+        return {"nodes": list(nodes.values()), "edges": []}
+
     async def run(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         LangGraph Node Execution Entrypoint for Researcher Agent.
@@ -57,7 +81,7 @@ class ResearcherAgent:
         # Extracting the target query from state
         query_target= state.get('target_component')
         # getting the graph NODES FROM OUR Neo4j DB
-        query_target_component =self.graph_db.query_graph_neighborhood(query_target,depth=2)
+        query_target_component = self._neighborhood_for(query_target or "")
         # making the principle vector query
         principle_query=self.vector_db.similarity_search(query_target)
 

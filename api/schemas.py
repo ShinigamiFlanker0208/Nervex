@@ -24,7 +24,21 @@ class IngestionResponse(BaseModel):
 class KnowledgeGraphQueryRequest(BaseModel):
     node_id: Optional[str] = Field(None, description="Specific node ID to query neighborhood")
     search_keyword: Optional[str] = Field(None, description="General search term across nodes")
-    depth: int = Field(2, description="Hop depth for neighborhood expansion")
+    depth: int = Field(2, ge=1, le=4, description="Hop depth (bounded: the manager interpolates it into Cypher)")
+
+
+class IngestionJobAccepted(BaseModel):
+    job_id: str
+    status_url: str
+
+
+class IngestionJobStatus(BaseModel):
+    job_id: str
+    filename: str
+    state: str                      # queued | running | done | failed
+    progress: List[str] = Field(default_factory=list)
+    result: Optional[IngestionResponse] = None
+    error: Optional[str] = None
 
 
 class GraphNeighborhoodResponse(BaseModel):
@@ -61,8 +75,8 @@ class CodeGenerationResponse(BaseModel):
 class ExplainerChatRequest(BaseModel):
     paper_id: str
     user_question: str
-    highlighted_line_start: int
-    highlighted_line_end: int
+    highlighted_line_start: int = Field(..., ge=1)
+    highlighted_line_end: int = Field(..., ge=1)
     current_code_script: str
     chat_history: List[Dict[str, str]] = Field(default_factory=list)
 
@@ -71,7 +85,7 @@ class ExplainerChatResponse(BaseModel):
     answer_markdown: str
     cited_graph_nodes: List[str]
     cited_paper_passages: List[str]
-    inferred_tensor_shapes: Optional[Dict[str, str]]
+    inferred_tensor_shapes: Optional[Dict[str, str]] = None
 
 
 # =====================================================================
@@ -82,6 +96,7 @@ class AblationStudyRequest(BaseModel):
     paper_id: str
     target_component: str
     baseline_code: str
+    expected_inputs: Dict[str, str] = Field(..., description='Dummy input shapes, e.g. {"x": "(2, 16, 64)"}')
     mutation_prompt: str = Field(..., description="Natural language mutation instruction")
 
 
