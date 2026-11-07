@@ -40,6 +40,9 @@ export const api = {
   ingestStatus: (id: string) => req<T.IngestJob>(`${V}/ingest/status/${id}`),
   startRun: (paper_id: string, target_component: string, target_framework = "PyTorch") =>
     req<{ run_id: string }>(`${V}/generate/runs`, json({ paper_id, target_component, target_framework })),
+  history: (pid: string) => req<T.RunSummary[]>(`${V}/generate/history?paper_id=${pid}`),
+  historyItem: (id: string) => req<T.RunStatus>(`${V}/generate/history/${id}`),
+  config: () => req<T.SystemConfig>(`${V}/system/config`),
   run: (id: string, since: number) => req<T.RunStatus>(`${V}/generate/runs/${id}?since=${since}`),
   explain: (b: { paper_id: string; user_question: string; start: number; end: number; code: string; history: { role: string; content: string }[] }) =>
     req<T.ExplainResult>(`${V}/explainer/chat`, json({

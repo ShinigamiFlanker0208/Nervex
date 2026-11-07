@@ -1,0 +1,25 @@
+.hw { background:#f4ecde; color:#1b1612; font-family:Outfit,system-ui,sans-serif; padding:120px 36px 100px; border-top:1.5px solid #1b1612; position:relative; }
+.hw-head { max-width:1100px; margin:0 auto 70px; } .hw-kicker { font:600 .7rem "JetBrains Mono"; letter-spacing:.3em; text-transform:uppercase; color:#b3262e; margin:0 0 10px; }
+.hw-head h2 { font:400 clamp(2.4rem,5.4vw,5rem)/1.02 "Instrument Serif",serif; font-style:italic; margin:0 0 22px; letter-spacing:-.015em; } .hw-head h2 em { color:#b3262e; }
+.hw-lede { font-size:1.15rem; line-height:1.65; color:#4a3f35; max-width:680px; }
+.hw-ledger { display:flex; flex-wrap:wrap; gap:0; margin-top:34px; border-top:1px solid rgba(27,22,18,.2); border-bottom:1px solid rgba(27,22,18,.2); } .hw-ledger div { padding:16px 28px 16px 0; margin-right:28px; border-right:1px solid rgba(27,22,18,.12); } .hw-ledger div:last-child { border-right:0; }
+.hw-ledger b { display:block; font:400 2.4rem/1 "Instrument Serif"; } .hw-ledger span { font:.7rem "JetBrains Mono"; color:#6a5d50; letter-spacing:.05em; }
+.hw-sec { max-width:1100px; margin:0 auto; display:grid; grid-template-columns:110px minmax(0,720px); gap:20px; padding:34px 0; border-top:1px solid rgba(27,22,18,.12); transition:background .3s; }
+.hw-sec.wide { grid-template-columns:110px minmax(0,1fr); } .hw-sec.step.hot { background:linear-gradient(90deg,rgba(179,38,30,.06),transparent 70%); }
+.hw-n { font:italic 2rem/1 "Instrument Serif"; color:#b3262e; padding-top:4px; } .hw-sec h3 { font:400 2rem/1.1 "Instrument Serif"; font-style:italic; margin:0 0 12px; }
+.hw-sec p, .hw-list li { font-size:1.04rem; line-height:1.72; color:#3d332a; } .hw-sec b { color:#1b1612; } .hw-sec em { font-family:"Instrument Serif"; font-size:1.15em; color:#b3262e; }
+.hw code { font:.86em "JetBrains Mono"; background:rgba(27,22,18,.06); padding:1px 6px; border-radius:2px; }
+.hw-list { padding-left:20px; margin:0; } .hw-list li { margin-bottom:12px; } .hw-list li::marker { color:#b3262e; } .hw-list.dim li { color:#6a5d50; } .hw-dim { color:#8a7c6c; font-style:italic; }
+.hw-fig { width:100%; height:auto; color:#1b1612; overflow:visible; margin-top:8px; } .hw-fig rect { fill:rgba(255,255,255,.55); stroke:#1b1612; stroke-width:1; } .hw-fig rect.store { fill:#1b1612; } .hw-fig .store + text, .hw-fig .store ~ text { fill:#f4ecde; }
+.hw-fig line, .hw-fig path { stroke:#1b1612; stroke-width:1; fill:none; } .hw-fig path.dash { stroke-dasharray:4 5; } .hw-fig path.red, .hw-fig .red { stroke:#b3262e; color:#b3262e; } .hw-fig text.red { fill:#b3262e; stroke:none; } .hw-fig text.good { fill:#2f6b43; } .hw-fig path.none { stroke:none; }
+.hw-fig .hw-t { font:italic 400 21px "Instrument Serif"; fill:#1b1612; } .hw-fig .hw-s { font:10px "JetBrains Mono"; fill:#6a5d50; } .hw-fig .hw-cap { font:600 10px "JetBrains Mono"; letter-spacing:.25em; fill:#b3262e; }
+.hw-fig g.on rect { fill:#1b1612; } .hw-fig g.on text { fill:#f4ecde; } .hw-fig g rect, .hw-fig g text { transition:fill .3s; }
+.hw-replay { margin-top:16px; border:1px solid rgba(27,22,18,.25); background:rgba(255,255,255,.45); padding:18px 20px; }
+.hw-rp-head { font-size:.9rem; color:#4a3f35; margin-bottom:12px; } .hw-rp-head b { font:italic 1.3rem "Instrument Serif"; color:#1b1612; } .hw-rp-head i { color:#b3262e; font-family:"Instrument Serif"; font-size:1.05rem; }
+.hw-replay input[type=range] { width:100%; accent-color:#b3262e; }
+.hw-rp-ticks { display:flex; gap:3px; margin:6px 0 16px; } .hw-rp-ticks button { flex:1; height:9px; border:0; padding:0; cursor:pointer; background:rgba(27,22,18,.2); } .hw-rp-ticks button.coder { background:rgba(27,22,18,.55); } .hw-rp-ticks button.critic { background:rgba(179,38,30,.45); } .hw-rp-ticks button.bad { background:#b3262e; } .hw-rp-ticks button.on { outline:2px solid #1b1612; outline-offset:2px; }
+.hw-rp-body { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.3fr); gap:22px; } .hw-rp-body small { font:.74rem "JetBrains Mono"; color:#b3262e; } .hw-rp-body h4 { font:italic 400 1.8rem "Instrument Serif"; margin:2px 0 6px; } .hw-rp-body p { font-size:.95rem; }
+.hw-rp-body blockquote { margin:8px 0 0; font:italic 1.05rem/1.45 "Instrument Serif"; color:#b3262e; border-left:2px solid #b3262e; padding-left:12px; }
+.hw-rp-body pre { font:.7rem/1.55 "JetBrains Mono"; background:#faf4e8; border:1px solid rgba(27,22,18,.15); padding:10px 12px; overflow:auto; max-height:360px; margin:0; white-space:pre; }
+.hw-end { max-width:1100px; margin:60px auto 0; text-align:center; } .hw-end p { font:.75rem "JetBrains Mono"; color:#8a7c6c; margin-top:22px; } .hw-end i { font:italic 1rem "Instrument Serif"; }
+@media (max-width:760px) { .hw { padding:80px 18px; } .hw-sec, .hw-sec.wide { grid-template-columns:1fr; gap:4px; } .hw-rp-body { grid-template-columns:1fr; } .hw-fig { min-width:640px; } .hw-sec.wide > div { overflow-x:auto; } }

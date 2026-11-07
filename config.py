@@ -73,6 +73,7 @@ class Settings(BaseSettings):
     
     # Directories
     BASE_DIR: Path = Path(__file__).parent.resolve()
+    RUNS_DIR: Path = Path(__file__).parent.resolve() / "data" / "runs"   # finished generation runs (the UI "shelf")
     UPLOAD_DIR: Path = Path(__file__).parent.resolve() / "uploads"
     ARTIFACTS_DIR: Path = Path(__file__).parent.resolve() / "execution_artifacts"
 

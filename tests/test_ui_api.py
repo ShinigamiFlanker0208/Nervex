@@ -9,6 +9,13 @@ from api import deps
 from api.runs import RunStore, summarize
 
 
+@pytest.fixture(autouse=True)
+def _runs_dir(tmp_path, monkeypatch):
+    # finished runs are persisted; never let a test write into the real data/runs
+    from config import settings
+    monkeypatch.setattr(settings, "RUNS_DIR", tmp_path / "runs")
+
+
 @pytest.fixture
 def client(monkeypatch):
     import main
@@ -88,3 +95,41 @@ def test_run_crash_is_reported_not_lost(client, monkeypatch):
 
 def test_unknown_run_404(client):
     assert client.get("/api/v1/generate/runs/zzz").status_code == 404
+
+
+# ---------------- persistence + system config ----------------
+def test_finished_run_is_saved_listed_and_reloadable(client, monkeypatch, tmp_path):
+    from config import settings
+    monkeypatch.setattr(settings, "RUNS_DIR", tmp_path)
+    monkeypatch.setattr(deps, "get_orchestrator", lambda: SimpleNamespace(workflow=Workflow()))
+    rid = client.post("/api/v1/generate/runs", json={"paper_id": "p9", "target_component": "mha"}).json()["run_id"]
+    for _ in range(60):
+        if client.get(f"/api/v1/generate/runs/{rid}").json()["state"] == "done":
+            break
+        time.sleep(0.05)
+    time.sleep(0.1)
+    hist = client.get("/api/v1/generate/history?paper_id=p9").json()
+    assert hist[0]["run_id"] == rid and hist[0]["status"] == "SUCCESS" and hist[0]["layers"] == 1
+    assert client.get("/api/v1/generate/history?paper_id=other").json() == []
+    full = client.get(f"/api/v1/generate/history/{rid}").json()
+    assert full["result"]["generated_code"] == "a = 1" and full["events"][-1]["node"] == "end"
+
+
+def test_history_id_cannot_escape_the_runs_dir(client):
+    assert client.get("/api/v1/generate/history/..%2F..%2Fetc%2Fpasswd").status_code == 404
+    assert client.get("/api/v1/generate/history/not-hex").status_code == 404
+
+
+def test_system_config_has_real_limits_and_no_secret(client):
+    r = client.get("/api/v1/system/config").json()
+    assert r["sandbox"]["network"] == "none" and r["loop"]["max_attempts"] >= 1 and "api_key" not in str(r).lower()
+
+
+def test_researcher_event_carries_latex():
+    ev = summarize("researcher", {"relevant_formulas": ["[eq1] $a+b$"], "hyperparameters": {}})
+    assert ev["formulas_tex"] == [{"id": "eq1", "latex": "$a+b$"}]
+
+
+def test_tests_do_not_touch_real_runs_dir():
+    from config import settings
+    assert "pytest" in str(settings.RUNS_DIR) or "tmp" in str(settings.RUNS_DIR)

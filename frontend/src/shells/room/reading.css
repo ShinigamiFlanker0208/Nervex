@@ -1,0 +1,29 @@
+.rr-front { position:relative; margin-top:6px; }
+.rr-front-plate .mg-plate-canvas { height:min(58vh,520px); border:0; background:transparent; }
+.rr-front-plate { border-top:1px solid var(--line); border-bottom:1px solid var(--line); background:radial-gradient(60% 60% at 50% 50%,rgba(255,255,255,.55),transparent 75%); }
+.rr-front-cap { max-width:620px; margin-top:22px; } .rr-front-cap .mg-big em { color:var(--pencil); }
+.rr-shelf { margin-top:44px; } .rr-shelf h3 { font:400 1.7rem "Instrument Serif"; font-style:italic; margin:0 0 14px; } .rr-shelf h3 span { font:.72rem "JetBrains Mono"; font-style:normal; color:var(--faint); margin-left:10px; }
+.rr-cards { display:grid; grid-template-columns:repeat(auto-fill,minmax(200px,1fr)); gap:12px; }
+.rr-card { text-align:left; background:#faf4e8; border:1px solid var(--line); padding:14px 14px 12px; cursor:pointer; display:flex; flex-direction:column; gap:4px; font:inherit; color:var(--ink); position:relative; transition:transform .18s, box-shadow .18s; box-shadow:0 1px 0 rgba(27,22,18,.05); }
+.rr-card:hover { transform:translateY(-3px) rotate(-.4deg); box-shadow:0 14px 26px -16px rgba(60,40,20,.5); }
+.rr-card b { font:italic 400 1.3rem/1.15 "Instrument Serif"; } .rr-card i { font-style:normal; font-size:.78rem; color:var(--mut); } .rr-card small { font:.66rem "JetBrains Mono"; color:var(--faint); margin-top:4px; }
+.rr-card-st { font:600 .58rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; align-self:flex-start; padding:2px 7px; border:1.2px solid; transform:rotate(-2deg); margin-bottom:4px; } .rr-card.ok .rr-card-st { color:var(--good); } .rr-card.bad .rr-card-st { color:var(--pencil); }
+.rr-id { font:.6rem "JetBrains Mono"; color:var(--faint); font-style:normal; } .rr-tick { font-style:normal; color:var(--good); margin-left:6px; font-size:.8rem; }
+.rr-mini { margin-top:22px; } .rr-mini .mg-plate-canvas { height:190px; }
+.rr-rail { margin:6px 0 18px; padding:14px 0 12px; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+.rr-rail ol { list-style:none; margin:0; padding:0; display:grid; grid-template-columns:repeat(5,1fr); position:relative; }
+.rr-rail ol::before { content:""; position:absolute; left:4%; right:4%; top:9px; border-top:1px dashed var(--faint); }
+.rr-rail li { position:relative; padding-top:22px; text-align:center; } .rr-rail li::before { content:""; position:absolute; top:4px; left:50%; width:11px; height:11px; margin-left:-5.5px; border-radius:50%; background:var(--paper); border:1.3px solid var(--faint); transition:.3s; }
+.rr-rail li b { display:block; font:600 .66rem "JetBrains Mono"; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); } .rr-rail li i { font:italic .95rem "Instrument Serif"; color:var(--faint); }
+.rr-rail li.seen::before { background:var(--ink); border-color:var(--ink); } .rr-rail li.seen b { color:var(--ink); } .rr-rail li.crit.seen::before { background:var(--pencil); border-color:var(--pencil); }
+.rr-rail li.act::before { background:var(--pencil); border-color:var(--pencil); box-shadow:0 0 0 5px rgba(179,38,30,.14); animation:rrp 1.3s infinite; } .rr-rail li.act b { color:var(--pencil); } .rr-rail li.act i { color:var(--ink); }
+@keyframes rrp { 50% { box-shadow:0 0 0 9px rgba(179,38,30,.04); } }
+.rr-rail p { margin:14px 0 0; display:flex; align-items:baseline; gap:14px; font:italic 1.3rem "Instrument Serif"; } .rr-rail time { font:.8rem "JetBrains Mono"; color:var(--mut); margin-left:auto; font-style:normal; }
+.rr-rail.done p span { color:var(--good); } .rr-rail.failed p span { color:var(--pencil); }
+.rr-draft-h { display:flex; align-items:baseline; flex-wrap:wrap; gap:6px; } .rr-difbtn { margin-left:auto; background:none; border:0; border-bottom:1px solid currentColor; cursor:pointer; padding:0; font:.72rem "JetBrains Mono"; color:var(--mut); } .rr-difbtn:hover { color:var(--pencil); }
+.rr-diff { margin-top:10px; font:.72rem/1.55 "JetBrains Mono"; background:#faf4e8; border:1px solid var(--line); max-height:320px; overflow:auto; padding:6px 0; }
+.rr-diff > div { white-space:pre; padding:0 12px; } .rr-diff span { display:inline-block; width:14px; color:var(--faint); } .rr-diff .add { background:rgba(47,107,67,.1); } .rr-diff .add span { color:var(--good); } .rr-diff .del { background:rgba(179,38,30,.08); text-decoration:line-through; text-decoration-color:rgba(179,38,30,.45); color:var(--mut); } .rr-diff .del span { color:var(--pencil); } .rr-diff .fold { color:var(--faint); text-align:center; font-style:italic; padding:4px; }
+.rr-codebar { display:flex; align-items:center; gap:14px; margin:4px 0 6px; font:.74rem "JetBrains Mono"; color:var(--mut); } .rr-codebar span { margin-right:auto; } .rr-codebar button { background:none; border:1px solid var(--line); padding:5px 12px; cursor:pointer; font:inherit; color:var(--ink); } .rr-codebar button:hover { border-color:var(--ink); }
+.rr-lens h5 { margin:6px 0 8px; font:600 .62rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); }
+.rr-eq { padding:10px 0; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:3px; transition:.2s; } .rr-eq.hot { background:rgba(179,38,30,.06); margin:0 -10px; padding:10px; }
+.rr-eq .rr-tex { font-size:1.05rem; overflow-x:auto; overflow-y:hidden; } .rr-eq small { font:.62rem "JetBrains Mono"; color:var(--faint); } .rr-eq button { align-self:flex-start; background:none; border:0; padding:0; cursor:pointer; font:italic .98rem "Instrument Serif"; color:var(--pencil); border-bottom:1px solid; } .rr-eq em { font:italic .9rem "Instrument Serif"; color:var(--faint); } .rr-eq.cited { border-left:2px solid var(--pencil); padding-left:10px; }

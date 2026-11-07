@@ -315,6 +315,11 @@ async def _drive_run(run_id: str, req: CodeGenerationRequest) -> None:
         error_logs=state.get("execution_logs", []) or [], error_type=err_type, error_details=err_details)
     runs.event(run_id, {"node": "end", "status": result.execution_status})
     runs.update(run_id, state="done" if result.execution_status == "SUCCESS" else "failed", result=result.model_dump())
+    try:
+        from api.runs import persist
+        persist(run_id)
+    except Exception:                                          # saving history must never break the run itself
+        log.exception("could not persist run %s", run_id)
 
 
 @router.post("/generate/runs", status_code=status.HTTP_202_ACCEPTED, response_model=RunAccepted,
@@ -331,6 +336,40 @@ async def start_run(request: CodeGenerationRequest) -> RunAccepted:
 
 
 _RUN_TASKS: set = set()
+
+
+@router.get("/generate/history", summary="Finished runs saved on disk (newest first)")
+async def run_history(paper_id: str = "", limit: int = 60) -> List[Dict[str, Any]]:
+    import asyncio
+    from api.runs import list_history
+    return await asyncio.to_thread(list_history, paper_id or None, max(1, min(limit, 200)))
+
+
+@router.get("/generate/history/{run_id}", response_model=RunStatus, summary="One saved run with all its events")
+async def run_history_item(run_id: str) -> Dict[str, Any]:
+    from api.runs import load_history
+    run = load_history(run_id)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown run_id.")
+    return run
+
+
+@router.get("/system/config", summary="The limits and settings the pipeline really runs with (no secrets)")
+async def system_config() -> Dict[str, Any]:
+    from agents.llm_factory import describe
+    try:
+        llm = describe()
+    except ValueError as exc:
+        llm = {"error": str(exc)}
+    return {
+        "llm": llm,
+        "sandbox": {"network": "none", "capabilities": "all dropped", "user": "1000:1000", "workspace": "read-only",
+                    "tmpfs_mb": 64, "memory_mb": settings.CONTAINER_MEMORY_LIMIT_MB, "timeout_s": settings.CONTAINER_TIMEOUT_SECONDS,
+                    "image": settings.DOCKER_SANDBOX_IMAGE},
+        "loop": {"max_attempts": settings.MAX_EXECUTION_ATTEMPTS, "loop_timeout_s": settings.TRANSLATION_TIMEOUT_SECONDS},
+        "ingest": {"extraction_concurrency": settings.EXTRACTION_CONCURRENCY, "max_failed_fraction": settings.EXTRACTION_MAX_FAILED_FRACTION,
+                   "max_upload_mb": settings.MAX_UPLOAD_MB, "ocr_gpu_fraction": settings.OCR_GPU_MEMORY_UTILIZATION},
+    }
 
 
 @router.get("/generate/runs/{run_id}", response_model=RunStatus, summary="Run state + events since index N")

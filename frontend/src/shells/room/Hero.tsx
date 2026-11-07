@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Workspace } from "../../data/useWorkspace";
 import { ForceSim } from "../../lib/forceSim";
 import { sampleText } from "./inkText";
+import { sampleBrain } from "./brain";
 import { IngestPanel } from "../../ui/shared";
 import "./hero.css";
 
@@ -21,6 +22,7 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
   const cv = useRef<HTMLCanvasElement>(null);
   const live = useRef(ws); live.current = ws;
   const [scene, setScene] = useState(0);
+  const [intro, setIntro] = useState(true); const introRef = useRef(true);
   const [adding, setAdding] = useState(false);
   const S = useRef({ p: 0, mouse: { x: -999, y: -999 }, ready: false, hov: -1 }).current;
   const paper = ws.papers.find(p => p.paper_id === ws.paperId);
@@ -33,6 +35,8 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
     const T = [0, 1, 2, 3].map(() => new Float32Array(N * 2));          // target positions per scene
     const A = [0, 1, 2, 3].map(() => new Float32Array(N));              // target alpha per scene
     const R = [0, 1, 2, 3].map(() => new Float32Array(N));              // target radius per scene
+    const BRAIN = new Float32Array(N * 2), WORD = new Float32Array(N * 2); const born = performance.now();
+    const fire = new Float32Array(N);                                       // neuron 'firing' during the brain phase
     let graphIdx: { id: string; name: string; type: string; deg: number }[] = [];
     let edges: [number, number][] = [];
     let rnd = (() => { let s = 99; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
@@ -42,7 +46,9 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
       rnd = (() => { let s = 99; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
       // scene 0: the word
       const word = await sampleText("Nervex", W, H * .62, N, Math.min(W * .27, 330));
-      for (let i = 0; i < N; i++) { T[0][i * 2] = word[i * 2]; T[0][i * 2 + 1] = word[i * 2 + 1] + H * .1; A[0][i] = .92; R[0][i] = 1.35; }
+      const brain = sampleBrain(W, H, N);
+      for (let i = 0; i < N; i++) { WORD[i * 2] = word[i * 2]; WORD[i * 2 + 1] = word[i * 2 + 1] + H * .1; BRAIN[i * 2] = brain[i * 2]; BRAIN[i * 2 + 1] = brain[i * 2 + 1]; A[0][i] = .92; R[0][i] = 1.35; }
+      T[0].set(WORD);
       // scene 1: the real graph (first K particles), the rest are quiet dust
       const g = live.current.graph;
       const K = g ? Math.min(g.nodes.length, 150) : 0;
@@ -91,6 +97,11 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
     let a0 = 0, a1 = 0, f = 0;
     const frame = (now: number) => {
       if (dead) return; raf = requestAnimationFrame(frame);
+      // the page opens as a brain assembling from dust, a few neurons fire, then the ink reflows into the word
+      const age = now - born, inBrain = !reduce && age < 3300;
+      if (inBrain) { T[0].set(BRAIN); if (age > 900 && Math.random() < .5) fire[(Math.random() * N) | 0] = 1; } else if (T[0][0] !== WORD[0]) T[0].set(WORD);
+      for (let i = 0; i < N; i++) if (fire[i] > 0) fire[i] *= .93;
+      if (introRef.current !== inBrain) { introRef.current = inBrain; setIntro(inBrain); }
       const pos = S.p * 3, s0 = Math.min(2, Math.floor(pos)), fr = smooth(clamp(pos - s0)); a0 = s0; a1 = s0 + 1; f = fr;
       ctx.clearRect(0, 0, W, H);
       const mx = S.mouse.x, my = S.mouse.y, reach = 110;
@@ -110,7 +121,7 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
         const dx = x[i] - mx, dy = y[i] - my, d2 = dx * dx + dy * dy;
         let h = 0;
         if (d2 < reach * reach) { const d = Math.sqrt(d2) || 1, push = (1 - d / reach); if (!reduce) { vx[i] += dx / d * push * 2.2; vy[i] += dy / d * push * 2.2; } h = push; }
-        heat[i] += (h - heat[i]) * .18;
+        heat[i] += (Math.max(h, fire[i]) - heat[i]) * .18;
         if (reduce) { x[i] = tx; y[i] = ty; } else { x[i] += vx[i]; y[i] += vy[i]; }
         if (i < graphIdx.length && d2 < hd && a0 === 0 && f > .5) { hd = d2; hov = i; }
         // dust is nearly invisible until touched
@@ -138,9 +149,11 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
       <div className="hero-stick">
         <canvas ref={cv} className="hero-canvas" aria-hidden />
         <div className="hero-top"><span className="hero-mark">Nervex</span><span className="hero-folio">a reading machine for research papers</span>
+          <button className="hero-skip ghost" onClick={() => document.getElementById("how")?.scrollIntoView({ behavior: "smooth" })}>how it works ↓</button>
           <button className="hero-skip" onClick={onEnter}>skip the tour →</button></div>
 
-        <section className={`hero-copy s0${scene === 0 ? " on" : ""}`}>
+        <p className={`hero-intro${intro && scene === 0 ? " on" : ""}`}>a model is a thought someone wrote down</p>
+        <section className={`hero-copy s0${scene === 0 && !intro ? " on" : ""}`}>
           <p className="hero-kicker">Papers hide machines.</p>
           <p className="hero-scroll">scroll <i /></p>
         </section>

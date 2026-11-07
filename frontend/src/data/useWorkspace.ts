@@ -2,7 +2,7 @@
 // so a design can change what things look like but never what they do.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { AblationResult, Component, ExplainResult, GenResult, GraphOverview, Health, IngestJob, Paper, RunEvent, TranspileResult } from "../api/types";
+import type { RunSummary, AblationResult, Component, ExplainResult, GenResult, GraphOverview, Health, IngestJob, Paper, RunEvent, TranspileResult } from "../api/types";
 import { parseTags } from "../lib/codeTags";
 
 export interface ChatTurn { role: "user" | "assistant"; content: string; cites?: string[]; passages?: string[]; error?: boolean }
@@ -35,6 +35,11 @@ export function useWorkspace() {
   // ---- ingest ----
   const [job, setJob] = useState<IngestJob | null>(null);
   const [ingestErr, setIngestErr] = useState<string | null>(null);
+
+  // ---- shelf (saved runs) ----
+  const [shelf, setShelf] = useState<RunSummary[]>([]);
+  const refreshShelf = useCallback(() => { if (paperId) api.history(paperId).then(setShelf).catch(() => setShelf([])); }, [paperId]);
+  useEffect(() => { refreshShelf(); }, [refreshShelf]);
 
   // ---- chat / tools ----
   const [chat, setChat] = useState<ChatTurn[]>([]);
@@ -105,11 +110,23 @@ export function useWorkspace() {
         const r = await api.run(ctl.id, ctl.since);
         if (r.events.length) { ctl.since = r.total_events; setEvents(prev => [...prev, ...r.events]); }
         setPhase(r.state === "queued" ? "queued" : r.state === "running" ? "running" : r.state);
-        if (r.state === "done" || r.state === "failed") { setResult(r.result); setElapsed((Date.now() - t0.current) / 1000); break; }
+        if (r.state === "done" || r.state === "failed") { setResult(r.result); setElapsed((Date.now() - t0.current) / 1000); setTimeout(refreshShelf, 400); break; }
         await new Promise(res => setTimeout(res, 600));
       }
     } catch (e) { setRunErr(errMsg(e)); setPhase("failed"); }
-  }, [paperId, framework]);
+  }, [paperId, framework, refreshShelf]);
+
+  /** Re-open a saved run exactly as it happened (events, code, traces). No API call to the LLM, no GPU. */
+  const openSaved = useCallback(async (id: string) => {
+    stopRun();
+    try {
+      const r = await api.historyItem(id);
+      const c = components.find(x => x.id === r.meta.target_component) ?? { id: r.meta.target_component, name: r.meta.target_component, description: null, degree: 0, formulas: 0 };
+      setComponent(c); setFramework(r.meta.target_framework ?? "PyTorch"); setEvents(r.events); setResult(r.result);
+      setPhase(r.state === "done" ? "done" : "failed"); setElapsed(r.events[r.events.length - 1]?.t ?? 0); setRunErr(null);
+      setChat([]); setAblation({ busy: false }); setTranspile({ busy: false });
+    } catch (e) { setRunErr(errMsg(e)); }
+  }, [components]);
 
   // ---------- ingest ----------
   const upload = useCallback(async (file: File) => {
@@ -179,6 +196,7 @@ export function useWorkspace() {
 
   return {
     health, offline, papers, paperId, setPaperId, graph, components, loadErr, selected, setSelected, hover, setHover,
+    shelf, openSaved, refreshShelf,
     phase, events, current, activeNode, attempts, result, component, framework, setFramework, elapsed, runErr, startRun,
     code, tags, litIds, traces, expectedInputs, skeleton,
     job, ingestErr, upload,

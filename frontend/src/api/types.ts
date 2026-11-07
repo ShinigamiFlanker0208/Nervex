@@ -14,7 +14,7 @@ export interface IngestJob {
 export type NodeName = "start" | "researcher" | "architect" | "coder" | "sandbox_executor" | "critic" | "end";
 export interface RunEvent {
   i: number; t: number; node: NodeName;
-  node_ids?: string[]; formulas?: number; hyperparameters?: string[];
+  node_ids?: string[]; formulas?: number; hyperparameters?: string[]; formulas_tex?: { id: string; latex: string }[];
   expected_inputs?: Record<string, string>; skeleton?: string;
   code?: string; lines?: number; attempt?: number | null;
   status?: string; layers?: string[]; log_tail?: string; feedback?: string;
@@ -40,4 +40,11 @@ export interface TranspileResult {
 export interface Health {
   status: string; message: string; subsystems: Record<string, boolean>;
   llm: { provider?: string; model?: string; has_key?: boolean; error?: string };
+}
+export interface RunSummary { run_id: string; paper_id: string; component: string; framework: string; status: string; attempts: number; duration: number; layers: number; lines: number; created_at: number }
+export interface SystemConfig {
+  llm: { provider?: string; model?: string };
+  sandbox: { network: string; capabilities: string; user: string; workspace: string; tmpfs_mb: number; memory_mb: number; timeout_s: number; image: string };
+  loop: { max_attempts: number; loop_timeout_s: number };
+  ingest: { extraction_concurrency: number; max_failed_fraction: number; max_upload_mb: number; ocr_gpu_fraction: number };
 }
