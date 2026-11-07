@@ -1,4 +1,5 @@
 import { Fragment, ReactNode, useMemo } from "react";
+import katex from "katex";
 import type { Component } from "../../../api/types";
 import type { Workspace } from "../../../data/useWorkspace";
 
@@ -48,9 +49,14 @@ export function PaperView({ ws, onOpenTable }: { ws: Workspace; onOpenTable: () 
 
   const mark = (text: string, key: string): ReactNode[] => {
     // equations were vaulted at ingest; show the token as a small mark instead of raw <MATH_BLOCK_0012>
-    const parts = text.split(/(<MATH_BLOCK_\d+>)/g);
+    const parts = text.split(/(\$\$[\s\S]+?\$\$|\$[^$\n]+?\$|<MATH_BLOCK_\d+>)/g);
     return parts.flatMap((part, pi) => {
       if (/^<MATH_BLOCK_\d+>$/.test(part)) return [<span key={`${key}m${pi}`} className="pv-eq" title={part}>equation</span>];
+      if (/^\$[\s\S]*\$$/.test(part)) {
+        const disp = part.startsWith("$$"), src = part.replace(/^\$\$?|\$\$?$/g, "");
+        const html = katex.renderToString(src, { throwOnError: false, displayMode: disp, trust: false });
+        return [<span key={`${key}k${pi}`} className={disp ? "pv-disp" : "pv-tex"} dangerouslySetInnerHTML={{ __html: html }} />];
+      }
       if (!re) return [part];
       const out: ReactNode[] = []; let last = 0; re.lastIndex = 0; let m: RegExpExecArray | null;
       while ((m = re.exec(part))) {
@@ -69,7 +75,12 @@ export function PaperView({ ws, onOpenTable }: { ws: Workspace; onOpenTable: () 
   const block = (t: string, key: string) => {
     const h = /^(#{1,4})\s+(.*)$/.exec(t.trim());
     if (h) return <h3 key={key} className={`pv-h h${h[1].length}`}>{mark(h[2].replace(/\*\*/g, ""), key)}</h3>;
-    if (/^\s*\|/.test(t)) return <pre key={key} className="pv-table">{t.trim()}</pre>;
+    if (/^\s*\|/.test(t)) {
+      const all = t.trim().split("\n"), cut = all.findIndex(l => !/^\s*\|/.test(l));
+      if (cut > 0) return <Fragment key={key}>{block(all.slice(0, cut).join("\n"), key + "t")}{block(all.slice(cut).join("\n"), key + "r")}</Fragment>;
+      const rows = all.filter(r => !/^\s*\|?[\s:|-]+\|?\s*$/.test(r)).map(r => r.trim().replace(/^\||\|$/g, "").split("|").map(c => c.trim()));
+      return <div key={key} className="pv-tablewrap"><table className="pv-tbl"><tbody>{rows.map((r, ri) => <tr key={ri}>{r.map((c, ci) => ri === 0 ? <th key={ci}>{mark(c.replace(/<\/?b>|\*\*/g, ""), `${key}${ri}${ci}`)}</th> : <td key={ci}>{mark(c.replace(/<\/?b>|\*\*/g, ""), `${key}${ri}${ci}`)}</td>)}</tr>)}</tbody></table></div>;
+    }
     return <p key={key}>{mark(t.replace(/\*\*([^*]+)\*\*/g, "$1").replace(/<\/?su[bp]>/g, ""), key)}</p>;
   };
 

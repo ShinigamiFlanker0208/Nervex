@@ -67,3 +67,7 @@
 .nb-detail li.bad span { color:var(--pencil); } .nb-detail li.ok span { color:var(--good); } .nb-pencil { font:italic 1rem/1.35 "Instrument Serif"; color:var(--pencil); }
 .nb-blank { padding:30px 0 30px 128px; font:italic 1.3rem "Instrument Serif"; }
 @media (max-width:760px) { .nb { padding-right:12px; background-image:repeating-linear-gradient(transparent 0 31px,rgba(70,110,160,.13) 31px 32px); } .nb-entry { grid-template-columns:1fr; gap:2px; } .nb-margin { text-align:left; } .nb-head, .nb-day, .nb-blank { padding-left:12px; } }
+
+.pv-tablewrap { overflow-x:auto; margin:0 0 1.2em; } .pv-tbl { border-collapse:collapse; font:.86rem/1.45 Georgia,serif; width:100%; }
+.pv-tbl th, .pv-tbl td { border-bottom:1px solid var(--line); padding:6px 10px; text-align:left; vertical-align:top; } .pv-tbl th { border-bottom:1.5px solid var(--ink); font-weight:600; }
+.pv-disp { display:block; overflow-x:auto; margin:.6em 0; } .pv-tex .katex { font-size:1em; }

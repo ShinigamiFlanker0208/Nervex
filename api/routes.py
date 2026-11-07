@@ -243,6 +243,10 @@ async def paper_passages(paper_id: str) -> List[Dict[str, Any]]:
     except Exception as exc:
         log.exception("passages failed")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Vector store error: {type(exc).__name__}")
+    vault = await asyncio.to_thread(_math_vault, paper_id)
+    tok = __import__("re").compile(r"<MATH_BLOCK_\d+>")
+    for r in rows:   # chunks were stored MASKED; put the paper's real LaTeX back
+        r["text"] = tok.sub(lambda m: vault.get(m.group(0), m.group(0)), r["text"])
     return [{"id": r["id"], "text": r["text"], "header": (r["meta"] or {}).get("header") or (r["meta"] or {}).get("section") or ""} for r in rows]
 
 
@@ -446,3 +450,22 @@ async def switch_provider(body: Dict[str, Any]) -> Dict[str, Any]:
     deps.reset_llm_clients()
     return {"ok": True, "provider": p, "model": settings.LLM_MODEL or F.DEFAULT_MODELS[p],
             "latency_s": round(__import__("time").time() - t0, 2), "reply": str(getattr(reply, "content", ""))[:40]}
+
+
+def _math_vault(paper_id: str) -> Dict[str, str]:
+    """Token -> original LaTeX. Not stored at ingest, but masking is deterministic (counter in document order),
+    so re-masking the cached OCR markdown reproduces exactly the same tokens."""
+    import json as _j
+    from functools import lru_cache
+    @lru_cache(maxsize=8)
+    def build(pid: str) -> Dict[str, str]:
+        f = settings.OCR_CACHE_DIR / f"{pid}.json"
+        if not f.exists(): return {}
+        md = _j.loads(f.read_text(encoding="utf-8")).get("raw_markdown", "")
+        from ingestion.math_masker import MathMasker
+        _, v = MathMasker().mask_document(md)
+        return {k: b.original_latex for k, b in v.items()}
+    global _VAULT_BUILD
+    try: _VAULT_BUILD
+    except NameError: _VAULT_BUILD = build
+    return _VAULT_BUILD(paper_id)
