@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { useWorkspace } from "./data/useWorkspace";
+import { RoomShell } from "./shells/room/RoomShell";
 import { SynapseShell } from "./shells/synapse/SynapseShell";
 import { MarginaliaShell } from "./shells/marginalia/MarginaliaShell";
 import { BenchShell } from "./shells/bench/BenchShell";
 
 export const FACES = [
+  { id: "room", label: "Room" },
   { id: "synapse", label: "Synapse" },
   { id: "marginalia", label: "Marginalia" },
   { id: "bench", label: "Bench" },
@@ -13,7 +15,7 @@ type Face = (typeof FACES)[number]["id"];
 
 const read = (): Face => {
   const f = new URLSearchParams(location.search).get("ui");
-  return (FACES.find(x => x.id === f)?.id ?? "synapse") as Face;
+  return (FACES.find(x => x.id === f)?.id ?? "room") as Face;
 };
 
 export function App() {
@@ -24,5 +26,6 @@ export function App() {
   const faces = <nav className="faces">{FACES.map(f => <a key={f.id} href={`?ui=${f.id}`} className={face === f.id ? "on" : ""} onClick={go(f.id)}>{f.label}</a>)}</nav>;
   if (face === "marginalia") return <MarginaliaShell ws={ws} faces={faces} />;
   if (face === "bench") return <BenchShell ws={ws} faces={faces} />;
-  return <SynapseShell ws={ws} faces={faces} />;
+  if (face === "synapse") return <SynapseShell ws={ws} faces={faces} />;
+  return <RoomShell ws={ws} faces={faces} />;
 }

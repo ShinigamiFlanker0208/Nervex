@@ -5,6 +5,7 @@ export interface SimNode extends GNode { x: number; y: number; vx: number; vy: n
 export interface SimEdge { a: SimNode; b: SimNode; type: string }
 
 export class ForceSim {
+  linked = new Set<string>();   // node ids that have at least one edge inside this drawn subset
   nodes: SimNode[]; edges: SimEdge[]; index = new Map<string, SimNode>(); alpha = 1; padRight = 130;   // Synapse draws labels right of nodes; small plates lower this
   constructor(nodes: GNode[], edges: GEdge[], public w: number, public h: number, seed = 7) {
     let s = seed; const rnd = () => ((s = (s * 16807) % 2147483647) / 2147483647);
@@ -18,6 +19,7 @@ export class ForceSim {
       const a = this.index.get(e.source), b = this.index.get(e.target);
       return a && b && a !== b ? [{ a, b, type: e.type }] : [];
     });
+    this.edges.forEach(e => { this.linked.add(e.a.id); this.linked.add(e.b.id); });
   }
   /** Keep the previous layout for nodes that already existed, so growing the graph doesn't scramble it. */
   adopt(old: ForceSim | null) {
@@ -48,7 +50,13 @@ export class ForceSim {
     }
     for (const n of nodes) {
       // gravity is NOT scaled by alpha: when the layout cools, loosely-connected nodes must stay near the middle
-      n.vx += (w / 2 - n.x) * 0.0018; n.vy += (h / 2 - n.y) * 0.0028;
+      // nodes with no edge in this subset have nothing to hold them: stronger gravity makes a halo, not a border
+      const gk = this.linked.has(n.id) ? 1 : 3.4;
+      n.vx += (w / 2 - n.x) * 0.0018 * gk; n.vy += (h / 2 - n.y) * 0.0028 * gk;
+      // soft containment: an elliptical wall that pushes back harder the further out a node is. A hard clamp alone
+      // pins every unconnected node to the border and draws ruler-straight rows of dots.
+      const ex = (n.x - w / 2) / Math.max(1, (w - this.padRight) / 2 - 10), ey = (n.y - h / 2) / Math.max(1, h / 2 - 24), er = Math.hypot(ex, ey);
+      if (er > .78) { const push = (er - .78) * 2.6; n.vx -= (ex / er) * push; n.vy -= (ey / er) * push; }
       const sp = Math.hypot(n.vx, n.vy); if (sp > 7) { n.vx *= 7 / sp; n.vy *= 7 / sp; }
       if (!n.fixed) { n.x += n.vx; n.y += n.vy; }
       n.vx *= 0.78; n.vy *= 0.78;

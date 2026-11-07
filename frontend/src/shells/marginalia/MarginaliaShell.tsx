@@ -19,7 +19,7 @@ function toDrafts(ws: Workspace): Draft[] {
   return out;
 }
 
-export function MarginaliaShell({ ws, faces }: { ws: Workspace; faces: React.ReactNode }) {
+export function MarginaliaShell({ ws, faces, onOpenInstrument, onTour }: { ws: Workspace; faces: React.ReactNode; onOpenInstrument?: () => void; onTour?: () => void }) {
   const [tab, setTab] = useState<Tab>("margin");
   const [range, setRange] = useState<[number, number] | null>(null);
   const [adding, setAdding] = useState(false);
@@ -40,6 +40,7 @@ export function MarginaliaShell({ ws, faces }: { ws: Workspace; faces: React.Rea
           {paper && <span>{paper.nodes} entities · {paper.edges} relations</span>}
           {ws.papers.length > 1 && <select value={ws.paperId ?? ""} onChange={e => ws.setPaperId(e.target.value)}>{ws.papers.map(p => <option key={p.paper_id} value={p.paper_id}>{p.title}</option>)}</select>}
           <button className="mg-link" onClick={() => setAdding(a => !a)}>add a paper</button>
+          {onTour && <button className="mg-link" onClick={onTour}>the tour</button>}
           {ws.health?.llm.provider && <span className="mg-pill">{ws.health.llm.provider}</span>}
           {faces}
         </div>
@@ -89,7 +90,8 @@ export function MarginaliaShell({ ws, faces }: { ws: Workspace; faces: React.Rea
             </ol>
             {ws.code && <div className="mg-codebox"><CodeView ws={ws} range={range} setRange={setRange} /></div>}
             {ws.phase === "failed" && ws.result && <p className="mg-dim">No draft passed after {ws.result.attempt_count} attempt(s){ws.result.error_details ? ` (${ws.result.error_details})` : ""}. The last draft is shown above; it is not verified.</p>}
-            {ws.phase === "done" && <section className={`mg-plate${wipe ? " wipe" : ""}`}><h3>Plate II <span>tensor flow, measured by hooks inside the sandbox</span></h3><Telemetry ws={ws} /></section>}
+            {ws.events.length > 0 && onOpenInstrument && <button className={`mg-gate${ws.phase === "done" ? " ok" : ""}`} onClick={onOpenInstrument} disabled={busy}>
+              <small>Plate II</small><span>{ws.phase === "done" ? "Enter the instrument room" : "Open the instrument room"}</span><i>measured in the sandbox, not guessed →</i></button>}
           </>}
         </main>
 
