@@ -80,13 +80,13 @@ def test_graph_query_requires_node_and_bounds_depth(client):
 
 def test_graph_query_ok_and_db_error_maps_to_503(client, monkeypatch):
     class G:
-        def query_graph_neighborhood(self, n, d): return {"nodes": [{"id": "1"}], "edges": []}
+        def query_graph_neighborhood(self, n, d, pid=None): return {"nodes": [{"id": "1"}], "edges": []}
     monkeypatch.setattr(deps, "get_graph_db", lambda: G())
     r = client.post("/api/v1/graph/query", json={"node_id": "a"})
     assert r.status_code == 200 and r.json()["nodes"] == [{"id": "1"}]
 
     class Bad:
-        def query_graph_neighborhood(self, n, d): raise ConnectionError("down")
+        def query_graph_neighborhood(self, n, d, pid=None): raise ConnectionError("down")
     monkeypatch.setattr(deps, "get_graph_db", lambda: Bad())
     assert client.post("/api/v1/graph/query", json={"node_id": "a"}).status_code == 503
 
@@ -136,7 +136,7 @@ def test_cors_is_not_wildcard(client):
 
 def test_graph_query_dedupes_edges_from_overlapping_paths(client, monkeypatch):
     class G:
-        def query_graph_neighborhood(self, n, d):
+        def query_graph_neighborhood(self, n, d, pid=None):
             e = {"id": "e1", "type": "X", "start": "a", "end": "b", "properties": {}}
             return {"nodes": [], "edges": [e, dict(e), {**e, "id": "e2"}]}
     monkeypatch.setattr(deps, "get_graph_db", lambda: G())
@@ -152,3 +152,17 @@ def test_generate_code_surfaces_orchestrator_failure_reason(client, monkeypatch)
     monkeypatch.setattr(deps, "get_orchestrator", lambda: O())
     b = client.post("/api/v1/generate/code", json={"paper_id": "p", "target_component": "A"}).json()
     assert b["execution_status"] == "CRITICAL_FAILURE" and "401" in b["error_details"]
+
+
+def test_uploaded_pdf_is_deleted_after_ingestion_success_and_failure(client, tmp_path, monkeypatch):
+    import ingestion.pipeline as pl
+    for n in ("get_pdf_parser", "get_masker", "get_chunker", "get_extractor", "get_graph_db", "get_vector_db"):
+        monkeypatch.setattr(deps, n, lambda: object())
+    monkeypatch.setattr(pl, "ingest_pdf", lambda *a, **k: {"paper_id": "p", "paper_title": "T", "num_pages": 1,
+                        "num_entities_extracted": 1, "num_relationships_merged": 0, "status_message": "ok"})
+    client.post("/api/v1/ingest/pdf", files={"file": ("a.pdf", PDF)})
+    assert list(tmp_path.glob("*.pdf")) == []
+    def boom(*a, **k): raise RuntimeError("x")
+    monkeypatch.setattr(pl, "ingest_pdf", boom)
+    client.post("/api/v1/ingest/pdf", files={"file": ("a.pdf", PDF)})
+    assert list(tmp_path.glob("*.pdf")) == []

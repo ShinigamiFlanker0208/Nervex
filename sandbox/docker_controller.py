@@ -191,6 +191,17 @@ def run_test():
             # first `model(` it finds, so a second call in another branch would run untraced.
             output=model(*_args, **_kwargs)
             print("Executing forward pass success")
+            # Always report the model's own boundary shapes: layers without Linear/Conv/LayerNorm
+            # (e.g. positional encodings) would otherwise produce an EMPTY trace.
+            def _shape(o):
+                if hasattr(o, "shape"):
+                    return list(o.shape)
+                if isinstance(o, (tuple, list)):
+                    return [_shape(i) for i in o]
+                if isinstance(o, dict):
+                    return {{str(k): _shape(v) for k, v in o.items()}}
+                return type(o).__name__
+            shape_log["__model__"] = {{"input": {{k: _shape(v) for k, v in _inputs.items()}}, "output": _shape(output)}}
             # /tmp is a tmpfs that dies with the container, so ship the traces via stdout.
             print("NERVEX_TRACES=" + json.dumps(shape_log))
 

@@ -51,11 +51,16 @@ def _run_ingestion(job_id: str, pdf_path: Path) -> None:
                 vector_db=deps.get_vector_db(),
                 on_progress=lambda m: jobs.log(job_id, m),
                 max_workers=settings.EXTRACTION_CONCURRENCY,
+                max_failed_fraction=settings.EXTRACTION_MAX_FAILED_FRACTION,
             )
         jobs.update(job_id, state="done", result=result)
     except Exception as exc:  # fail loud into the job record, with the type for debugging
         log.exception("ingestion failed")
         jobs.update(job_id, state="failed", error=f"{type(exc).__name__}: {exc}")
+    finally:
+        # The upload is only an input: results live in Neo4j/Chroma and the OCR cache is content-addressed,
+        # so keeping the PDF just leaks disk (uploads/ grew by one file per request).
+        pdf_path.unlink(missing_ok=True)
 
 
 @router.post("/ingest/pdf", status_code=status.HTTP_202_ACCEPTED, response_model=IngestionJobAccepted,
@@ -106,7 +111,7 @@ async def query_knowledge_graph(request: KnowledgeGraphQueryRequest) -> GraphNei
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, "node_id is required.")
     import asyncio
     try:
-        sub = await asyncio.to_thread(deps.get_graph_db().query_graph_neighborhood, request.node_id, request.depth)
+        sub = await asyncio.to_thread(deps.get_graph_db().query_graph_neighborhood, request.node_id, request.depth, request.paper_id)
     except Exception as exc:
         log.exception("graph query failed")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Graph database error: {type(exc).__name__}")
@@ -172,6 +177,7 @@ async def chat_explain_code(request: ExplainerChatRequest) -> ExplainerChatRespo
         (request.highlighted_line_start, request.highlighted_line_end),
         request.current_code_script,
         request.chat_history,
+        paper_id=request.paper_id,
     )
     return ExplainerChatResponse(**result)
 

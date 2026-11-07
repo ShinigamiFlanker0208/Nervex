@@ -22,6 +22,7 @@ class IngestionResponse(BaseModel):
 
 
 class KnowledgeGraphQueryRequest(BaseModel):
+    paper_id: Optional[str] = Field(None, description="Restrict to one ingested paper (recommended)")
     node_id: Optional[str] = Field(None, description="Specific node ID to query neighborhood")
     search_keyword: Optional[str] = Field(None, description="General search term across nodes")
     depth: int = Field(2, ge=1, le=4, description="Hop depth (bounded: the manager interpolates it into Cypher)")

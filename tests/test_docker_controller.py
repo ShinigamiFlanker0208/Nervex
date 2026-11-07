@@ -211,3 +211,25 @@ def test_defaults_everywhere_runs_and_mask_is_boolean(tmp_path, controller):
     """)
     rc, out = _run_harness(tmp_path, controller, code, {"x": "[2, 4]", "mask": "[2, 4]"})
     assert rc == 0 and "forward pass success" in out, out
+
+
+def test_model_boundary_shapes_always_traced(tmp_path, controller):
+    """Live E2E: a Positional Encoding module has no Linear/Conv layers -> trace was empty."""
+    pytest.importorskip("torch")
+    code = textwrap.dedent("""\
+        import torch, torch.nn as nn
+        class PE(nn.Module):
+            def __init__(self, d=4):
+                super().__init__()
+            def forward(self, x):
+                return x + 1, {"aux": x.sum(-1)}
+    """)
+    h = controller._generate_execution_harness(code, {"x": "[2, 3, 4]"}).replace(".cuda()", "")
+    (tmp_path / "telemetry_tracker.py").write_text("shape_log = {}\ndef attach_tensor_tracer(m):\n    pass\n")
+    (tmp_path / "jax.py").write_text("")
+    (tmp_path / "main_run.py").write_text(h)
+    p = subprocess.run([sys.executable, "main_run.py"], cwd=tmp_path, capture_output=True, text=True)
+    line = next(l for l in p.stdout.splitlines() if l.startswith("NERVEX_TRACES="))
+    import json
+    tr = json.loads(line[len("NERVEX_TRACES="):])
+    assert tr["__model__"] == {"input": {"x": [2, 3, 4]}, "output": [[2, 3, 4], {"aux": [2, 3]}]}

@@ -4,7 +4,7 @@
 
 Nervex reads a research paper, builds a knowledge graph of its architecture and equations, then runs a multi-agent loop that writes PyTorch/JAX code for a component, executes it inside a locked-down GPU sandbox, and feeds real tracebacks back until the forward pass works. On success you also get the exact tensor shapes at every layer.
 
-> **Status: alpha.** Components are unit-tested (74 tests, no GPU/Docker/API key needed) and the sandbox is verified on a real GPU container. Full paper-to-code runs are being validated; expect rough edges. Issues and PRs welcome.
+> **Status: alpha.** 130+ unit tests (no GPU/Docker/API key needed) plus a live end-to-end run on *Attention Is All You Need*: ingest → knowledge graph → Multi-Head Attention generated, executed in the GPU sandbox on the first attempt, with per-layer tensor shapes. Expect rough edges. Issues and PRs welcome.
 
 ## How it works
 
@@ -39,6 +39,7 @@ no network (`network_mode=none`), all Linux capabilities dropped, non-root user 
 - Docker + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/) and an NVIDIA GPU (the harness runs models on CUDA)
 - Neo4j 5 (one command below)
 - A free NVIDIA NIM API key from [build.nvidia.com](https://build.nvidia.com)
+- ~8 GB VRAM. PDF OCR (Marker/Surya) starts its own short-lived vLLM container, so the **first ingestion of a paper takes several minutes** (cold start + OCR); re-ingesting the same file is served from a content-hash cache. The OCR container is torn down afterwards so the sandbox gets the GPU.
 
 ## Quickstart
 
@@ -65,7 +66,7 @@ Check `GET /` — it reports live status of Neo4j, Docker, the sandbox image and
 |---|---|
 | `POST /ingest/pdf` | Upload a paper → `202` + `job_id` (ingestion takes minutes) |
 | `GET  /ingest/status/{job_id}` | Poll progress / result |
-| `POST /graph/query` | Neighbourhood of a graph node |
+| `POST /graph/query` | Neighbourhood of a graph node (pass `paper_id` to scope it) |
 | `POST /generate/code` | Run the full agent loop for a component |
 | `POST /explainer/chat` | Ask about highlighted generated lines |
 | `POST /features/ablation` | Mutate + re-run + compare (baseline is verified in the sandbox first) |
@@ -80,9 +81,15 @@ uv run pytest tests -q          # no GPU, Docker daemon, Neo4j or API key requir
 ## Known limitations
 
 - Needs an NVIDIA GPU; the harness calls `.cuda()`.
-- The harness feeds one input named `x` and picks the first `nn.Module` it finds.
-- Graph nodes are global (not yet scoped per paper); vectors are paper-scoped.
-- LLM quality bounds output quality. The sandbox proves it *runs*, not that the math matches the paper.
+- Generated models must be constructible with **no arguments** (every `__init__` parameter needs a default); the Coder is told this, and violations produce an explicit error for the Critic.
+- The harness feeds the Architect's dummy inputs: float by default, `bool` for names containing `mask`, `int64` for `*ids`/`tokens`. Anything more exotic needs an explicit dtype word in the shape (`"[4, 128] int64"`).
+- Telemetry hooks `Linear`, `Conv2d`, `LayerNorm`, `MultiheadAttention`; every run also records the model's own input/output shapes under `__model__`.
+- **Transpilation is compile-checked, not executed.** `syntax_valid` means the code compiles and passes the import whitelist; it does **not** prove the JAX model runs. In a live test the generated Equinox attention compiled but failed at runtime (`jax.vmap(self.w_q)` over a batched `[B, T, D]` input, a classic Equinox mistake). Treat transpiled code as a draft until you run it.
+- **Ablation regenerates the whole module**, so the LLM may change more than the one thing you asked.
+- Graph retrieval quality is bounded by LLM entity extraction: formula links for a component can be noisy (e.g. complexity-table entries instead of the core equation), and graph nodes are global rather than scoped per paper (vectors are paper-scoped).
+- Ingestion makes ~70 LLM calls per paper (default 4 in parallel; 429s trigger a shared cooldown and retries). On a rate-limited key expect 10-25 min. If more than 25% of chunks still fail, the job fails **without writing anything**, so a bad run never overwrites a good graph.
+- Upstream LLM trouble surfaces as typed JSON errors: `429 rate_limited`, `504 timeout`, `502 upstream_error|upstream_auth|connection` (with `Retry-After` where relevant).
+- The sandbox proves code *runs*, not that the math matches the paper.
 
 ## License
 

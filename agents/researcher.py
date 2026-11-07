@@ -43,7 +43,7 @@ class ResearcherAgent:
             collection_name=settings.COLLECTION_NAME
         )
 
-    def _neighborhood_for(self, target: str) -> Dict[str, Any]:
+    def _neighborhood_for(self, target: str, paper_id: str = None) -> Dict[str, Any]:
         """
         Resolve free text to real graph ids, then merge their depth-2 neighbourhoods.
         Order: exact slug id -> name/id substring search (top 3). Empty graph -> empty result,
@@ -51,12 +51,12 @@ class ResearcherAgent:
         """
         ids = [slugify_node_id(target)]
         try:
-            ids += [h["node_id"] for h in self.graph_db.search_nodes(target, limit=3)]
+            ids += [h["node_id"] for h in self.graph_db.search_nodes(target, limit=3, paper_id=paper_id)]
         except Exception as exc:  # a graph hiccup must not kill the whole run
             print(f"[Researcher] node search failed: {type(exc).__name__}: {exc}")
         nodes: Dict[str, Any] = {}
         for node_id in dict.fromkeys(i for i in ids if i):
-            sub = self.graph_db.query_graph_neighborhood(node_id, depth=2)
+            sub = self.graph_db.query_graph_neighborhood(node_id, depth=2, paper_id=paper_id)
             for n in sub.get("nodes", []):
                 nodes.setdefault(n["id"], n)
         return {"nodes": list(nodes.values()), "edges": []}
@@ -81,9 +81,10 @@ class ResearcherAgent:
         # Extracting the target query from state
         query_target= state.get('target_component')
         # getting the graph NODES FROM OUR Neo4j DB
-        query_target_component = self._neighborhood_for(query_target or "")
+        paper_id = state.get('paper_id') or None      # scope graph + vectors to the chosen paper
+        query_target_component = self._neighborhood_for(query_target or "", paper_id)
         # making the principle vector query
-        principle_query=self.vector_db.similarity_search(query_target)
+        principle_query=self.vector_db.similarity_search(query_target, filter_metadata={"paper_id": paper_id} if paper_id else None)
 
         relevant_formulas = []
         hyperparameters = {}
@@ -98,7 +99,10 @@ class ResearcherAgent:
             if entity_type == "Formula":
                 # Extract the formula string from the inner properties and add to our list
                 if "formula" in inner_props:
-                    relevant_formulas.append(inner_props["formula"])
+                    # Prefix with the graph node id so the Coder can cite it as `# Implements: <Node_ID: ...>`
+                    # (the Explainer binds code lines back to the paper through those tags).
+                    nid = node_props.get("node_id")
+                    relevant_formulas.append(f"[{nid}] {inner_props['formula']}" if nid else inner_props["formula"])
 
             elif entity_type == "Hyperparameter":
                 # Map the hyperparameter name to its value (if it has one)

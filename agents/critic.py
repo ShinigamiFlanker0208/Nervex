@@ -56,7 +56,13 @@ Provide extremely concise instructions to the coder on exactly how to fix the co
         whitelist = {"torch", "jax", "equinox", "einops", "numpy", "math", "typing"}
         try:
             tree = ast.parse(code_string)
+            # ast.parse only checks GRAMMAR. Errors like duplicate argument names, `return` outside a
+            # function, or `nonlocal` misuse surface at compile() (found live: an LLM-transpiled JAX
+            # module with `def f(self, key, key)` passed ast.parse and was reported "syntax_valid").
+            compile(code_string, "<generated>", "exec")
         except SyntaxError as e:
+            return False, f"Syntax Error: {str(e)}"
+        except ValueError as e:                      # e.g. source contains null bytes
             return False, f"Syntax Error: {str(e)}"
             
         for node in ast.walk(tree):

@@ -63,14 +63,14 @@ def test_transpile_ok_normalises_names_and_splits_notes():
     assert out["target_framework"] == "JAX" and out["syntax_valid"] and "keys split" in out["notes"]
 
 
-def test_transpile_repairs_once_after_static_failure():
+def test_transpile_repairs_after_static_failure():
     llm = LLM("```python\nimport os\n```", "```python\nimport jax\n```")
     out = run(FrameworkTranspiler(llm=llm, critic=Critic()).transpile_model("c", "PyTorch", "JAX", ""))
     assert llm.calls == 2 and out["syntax_valid"]
 
 
-def test_transpile_reports_failure_after_second_bad_attempt_and_missing_block():
-    llm = LLM("```python\nimport os\n```", "no code here")
+def test_transpile_reports_failure_after_all_bad_attempts_and_missing_block():
+    llm = LLM("```python\nimport os\n```", "no code here", "```python\nimport os\n```")
     out = run(FrameworkTranspiler(llm=llm, critic=Critic()).transpile_model("c", "PyTorch", "JAX", ""))
     assert not out["syntax_valid"] and "STATIC ANALYSIS FAILED" in out["notes"]
 

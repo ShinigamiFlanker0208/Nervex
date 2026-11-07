@@ -9,6 +9,8 @@ instantly at the toggle of a button in the frontend UI.
 import re
 from typing import Dict, Any, Optional
 
+from agents.llm_retry import ainvoke_with_retry
+
 # TODO: Import LLM translation chains and syntax validators
 # from langchain_core.prompts import ChatPromptTemplate
 # from langchain_google_genai import ChatGoogleGenerativeAI
@@ -78,8 +80,8 @@ class FrameworkTranspiler:
         messages = [("system", self.SYSTEM_PROMPT), ("human", user_msg)]
 
         code, notes, valid, msg = "", "", False, ""
-        for attempt in range(2):  # one repair round using the static-analysis message
-            reply = await self.llm.ainvoke(messages)
+        for attempt in range(3):  # up to two repair rounds, each fed the exact static-analysis failure
+            reply = await ainvoke_with_retry(self.llm, messages)
             code, notes = self._split_reply(reply.content if isinstance(reply.content, str) else str(reply.content))
             if not code:
                 valid, msg = False, "model returned no ```python block"

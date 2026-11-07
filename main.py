@@ -18,6 +18,7 @@ import logging
 
 from config import settings
 from api.routes import router as api_router
+from api.errors import register_error_handlers
 from api import deps
 
 log = logging.getLogger("nervex")
@@ -76,6 +77,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if not status_.get("sandbox_image"):
         log.warning("Build the sandbox: docker build -f sandbox/Dockerfile.sandbox -t %s .", settings.DOCKER_SANDBOX_IMAGE)
 
+    if status_.get("neo4j"):
+        try:
+            await asyncio.to_thread(deps.get_graph_db().create_constraints)
+        except Exception:
+            log.exception("could not create Neo4j constraints/indexes")
+
     yield
 
     print("--- [SoulGraph] Shutting down resources ---")
@@ -104,6 +111,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api/v1")
+register_error_handlers(app)
 
 
 @app.get("/", summary="Root Health Endpoint")

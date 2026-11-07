@@ -7,7 +7,14 @@ Allows users to highlight generated backend code and query theoretical foundatio
 Neo4j Graph neighborhoods, and Vector DB passages before formatting a mathematically rigorous explanation.
 """
 
+import contextvars
+
+from agents.llm_retry import ainvoke_with_retry
 from typing import List, Dict, Any, Optional, Tuple
+
+# Which paper the current chat belongs to. A ContextVar (not a tool argument) so the LLM-visible tool
+# schemas stay clean, and it propagates into asyncio.to_thread workers automatically.
+_PAPER_ID: contextvars.ContextVar = contextvars.ContextVar("nervex_paper_id", default=None)
 
 # TODO: Import LangChain tool calling agents and schemas
 # from langchain.agents import AgentExecutor, create_tool_calling_agent
@@ -37,7 +44,7 @@ def query_knowledge_graph(node_id: str, depth: int = 2) -> Dict[str, Any]:
     """
     from api.deps import get_graph_db
     depth = max(1, min(int(depth), 4))  # depth is interpolated into Cypher by the manager: clamp it
-    return get_graph_db().query_graph_neighborhood(node_id, depth)
+    return get_graph_db().query_graph_neighborhood(node_id, depth, paper_id=_PAPER_ID.get())
 
 
 # @tool
@@ -48,7 +55,9 @@ def search_paper_text(query_string: str, n_results: int = 3) -> List[str]:
     # TODO: Connect to VectorStoreManager and execute similarity_search(query_string, n_results).
     """
     from api.deps import get_vector_db
-    hits = get_vector_db().similarity_search(query_string, n_results=max(1, min(int(n_results), 8)))
+    pid = _PAPER_ID.get()
+    hits = get_vector_db().similarity_search(query_string, n_results=max(1, min(int(n_results), 8)),
+                                             filter_metadata={"paper_id": pid} if pid else None)
     return [h.get("content") or h.get("document") or str(h) for h in hits]
 
 
@@ -111,11 +120,12 @@ class ExplainerChatAgent:
         return self.llm.bind_tools(tools)
 
     async def explain(self, user_question: str, highlighted_code_lines: Tuple[int, int], current_script: str,
-                      chat_history: List[Any]) -> Dict[str, Any]:
+                      chat_history: List[Any], paper_id: Optional[str] = None) -> Dict[str, Any]:
         """Full result: answer + citations. `answer_user_query` is the string-only view of this."""
         import asyncio
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, ToolMessage
 
+        _PAPER_ID.set(paper_id)
         start, end = highlighted_code_lines
         # Deterministic first hop (no LLM): which graph nodes / shapes does this selection touch?
         try:
@@ -139,7 +149,7 @@ class ExplainerChatAgent:
         passages: List[str] = []
         response = None
         for _ in range(self.MAX_TOOL_HOPS + 1):
-            response = await llm.ainvoke(messages)
+            response = await ainvoke_with_retry(llm, messages)
             calls = getattr(response, "tool_calls", None) or []
             if not calls:
                 break

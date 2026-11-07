@@ -57,7 +57,9 @@ class Settings(BaseSettings):
     OCR_CACHE_DIR: Path = Path(__file__).parent.resolve() / "data" / "ocr_cache"
     # Parallel LLM entity-extraction calls. A 550B thinking model takes ~30 s/chunk, so 67 chunks
     # sequentially is ~40 min. Lower this if your NIM key is rate-limited (HTTP 429).
-    EXTRACTION_CONCURRENCY: int = 6
+    EXTRACTION_CONCURRENCY: int = 4
+    # Refuse to persist (and thereby overwrite a good graph) if more than this fraction of chunks failed.
+    EXTRACTION_MAX_FAILED_FRACTION: float = 0.25
     API_HOST: str = "127.0.0.1"  # loopback by default: this API can run code on your GPU
     API_PORT: int = 8000
     

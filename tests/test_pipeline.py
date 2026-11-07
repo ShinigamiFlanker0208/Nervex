@@ -8,6 +8,7 @@ from ingestion.pipeline import ingest_pdf, compute_paper_id
 def _no_backoff(monkeypatch):
     import ingestion.pipeline as pl
     monkeypatch.setattr(pl, "RETRY_BACKOFF_S", 0)
+    monkeypatch.setattr(pl, "RATE_LIMIT_BASE_S", 0)
 
 
 class FakeParser:
@@ -31,18 +32,18 @@ class FakeExtractor:
     def merge_subgraph_schemas(self, s): return SimpleNamespace(paper_title="Merged", nodes=s, edges=[])
 
 class FakeGraph:
-    def insert_paper_schema(self, s): return {"nodes": len(s.nodes), "edges": 0}
+    def replace_paper_schema(self, s, paper_id): return {"nodes": len(s.nodes), "edges": 0}
 
 class FakeVec:
     def __init__(self): self.chunks = None
     def add_chunks(self, c): self.chunks = c
 
 
-def run(tmp_path, extractor=None, chunker=None):
+def run(tmp_path, extractor=None, chunker=None, **kw):
     pdf = tmp_path / "a.pdf"; pdf.write_bytes(b"%PDF-1.4 hello")
     vec = FakeVec()
     out = ingest_pdf(pdf, FakeParser(), FakeMasker(), chunker or FakeChunker(), extractor or FakeExtractor(),
-                     FakeGraph(), vec)
+                     FakeGraph(), vec, **kw)
     return out, vec, pdf
 
 
@@ -62,7 +63,7 @@ def test_vault_filtered_to_chunk_tokens(tmp_path):
 
 
 def test_partial_failure_is_reported_not_fatal(tmp_path):
-    out, _, _ = run(tmp_path, FakeExtractor(fail_on={"c1"}))
+    out, _, _ = run(tmp_path, FakeExtractor(fail_on={"c1"}), chunker=FakeChunker(8), max_failed_fraction=0.25)
     assert "1 failed" in out["status_message"]
 
 
@@ -95,7 +96,7 @@ def test_parallel_extraction_preserves_order_and_reports_progress(tmp_path):
                on_progress=msgs.append, max_workers=4)
     assert msgs[-2] == "extracted 8/8" or "extracted 8/8" in msgs
     ex = Slow(); ex.merge_subgraph_schemas = lambda s: SimpleNamespace(paper_title="M", nodes=[n for x in s for n in x.nodes], edges=[])
-    out = ingest_pdf(pdf, FakeParser(), FakeMasker(), FakeChunker(8), ex, type("G", (), {"insert_paper_schema": lambda s, m: captured.append(m.nodes) or {"nodes": 8, "edges": 0}})(), FakeVec(), max_workers=4)
+    out = ingest_pdf(pdf, FakeParser(), FakeMasker(), FakeChunker(8), ex, type("G", (), {"replace_paper_schema": lambda s, m, pid: captured.append(m.nodes) or {"nodes": 8, "edges": 0}})(), FakeVec(), max_workers=4)
     assert captured[0] == [f"c{i}" for i in range(8)]     # input order, not completion order
 
 captured = []
@@ -119,8 +120,8 @@ def test_persistent_failure_exhausts_retries(tmp_path, monkeypatch):
     import ingestion.pipeline as pl
     monkeypatch.setattr(pl, "RETRY_BACKOFF_S", 0)
     ex = FakeExtractor(fail_on={"c1"})
-    run(tmp_path, ex)
-    assert sum(1 for _ in ex.seen) == 1 + pl.RETRIES        # c0 once, c1 RETRIES times
+    run(tmp_path, ex, chunker=FakeChunker(8))
+    assert sum(1 for _ in ex.seen) == 7 + pl.RETRIES        # 7 good chunks once, c1 RETRIES times
 
 
 def test_title_majority_vote_beats_first_chunk():
@@ -128,3 +129,25 @@ def test_title_majority_vote_beats_first_chunk():
     mk = lambda t: SimpleNamespace(paper_title=t)
     assert pick_title([mk("Google Permission Notice"), mk("Attention Is All You Need"), mk("Attention Is All You Need")], "x") == "Attention Is All You Need"
     assert pick_title([mk(""), mk("  ")], "fallback") == "fallback"
+
+
+def test_rate_limit_is_retried_with_shared_cooldown_then_succeeds(tmp_path):
+    class RL(FakeExtractor):
+        def __init__(self): super().__init__(); self.n = 0
+        def extract_from_chunk(self, text, vault):
+            self.n += 1
+            if self.n <= 3: raise Exception("[429] Too Many Requests")
+            return super().extract_from_chunk(text, vault)
+    out, _, _ = run(tmp_path, RL(), chunker=FakeChunker(2))
+    assert "failed" not in out["status_message"]
+
+
+def test_too_lossy_extraction_raises_before_persisting(tmp_path):
+    persisted = []
+    class G(FakeGraph):
+        def replace_paper_schema(self, s, pid): persisted.append(1); return {"nodes": 1, "edges": 0}
+    pdf = tmp_path / "a.pdf"; pdf.write_bytes(b"%PDF-1.4 hello")
+    ex = FakeExtractor(fail_on={f"c{i}" for i in range(1, 6)})        # 5 of 6 chunks fail
+    with pytest.raises(RuntimeError, match="too lossy"):
+        ingest_pdf(pdf, FakeParser(), FakeMasker(), FakeChunker(6), ex, G(), FakeVec(), max_failed_fraction=0.25)
+    assert persisted == []                                              # old graph untouched
