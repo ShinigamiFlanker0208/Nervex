@@ -50,6 +50,7 @@ def _run_ingestion(job_id: str, pdf_path: Path) -> None:
                 graph_db=deps.get_graph_db(),
                 vector_db=deps.get_vector_db(),
                 on_progress=lambda m: jobs.log(job_id, m),
+                max_workers=settings.EXTRACTION_CONCURRENCY,
             )
         jobs.update(job_id, state="done", result=result)
     except Exception as exc:  # fail loud into the job record, with the type for debugging
@@ -109,7 +110,9 @@ async def query_knowledge_graph(request: KnowledgeGraphQueryRequest) -> GraphNei
     except Exception as exc:
         log.exception("graph query failed")
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Graph database error: {type(exc).__name__}")
-    return GraphNeighborhoodResponse(center_node_id=request.node_id, nodes=sub["nodes"], edges=sub["edges"])
+    # The manager returns one row per PATH, so the same edge repeats at depth >= 2: dedupe by id.
+    edges = list({e["id"]: e for e in sub["edges"]}.values())
+    return GraphNeighborhoodResponse(center_node_id=request.node_id, nodes=sub["nodes"], edges=edges)
 
 
 # =====================================================================
@@ -150,6 +153,8 @@ async def generate_and_execute_code(request: CodeGenerationRequest) -> CodeGener
         execution_status=final.get("execution_status", "UNKNOWN"),
         tensor_shape_traces=final.get("tensor_shape_traces", {}) or {},
         error_logs=final.get("execution_logs", []) or [],
+        error_type=final.get("error_type"),
+        error_details=final.get("error_details"),
     )
 
 

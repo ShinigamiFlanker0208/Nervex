@@ -42,9 +42,12 @@ class Neo4jGraphManager:
         # TODO: Call self.driver.close() if active.
         """
 
-        if self.driver.verify_connectivity():
-                print('Driver is active and closing it now')
-                self.driver.close()
+        # verify_connectivity() returns None (it raises on failure), so it can't be used as a condition:
+        # the old `if` was always False and the driver was never closed.
+        driver = getattr(self, "driver", None)
+        if driver is not None:
+            print('Driver is active and closing it now')
+            driver.close()
         else:
             print('Driver is not active or not found')
 
@@ -60,8 +63,11 @@ class Neo4jGraphManager:
                 record = result.single()
                 if record and record["test"] == 1:
                     print("Server is running and reachable.")
-        except ServiceUnavailable:
-            print("Server is down or unreachable.")
+                    return True
+            return False
+        except Exception as exc:  # ServiceUnavailable, AuthError, DNS... any failure means "not usable"
+            print(f"Server is down or unreachable: {type(exc).__name__}")
+            return False
 
     def create_constraints(self) -> None:
         """

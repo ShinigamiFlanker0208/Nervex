@@ -35,8 +35,9 @@ def get_vector_db() -> Any:
 
 @lru_cache(maxsize=1)
 def get_pdf_parser() -> Any:
-    from ingestion.pdf_parser import PDFIngestionEngine
-    return PDFIngestionEngine(use_cuda=settings.ENABLE_GPU_PASSTHRU, device_id=settings.CUDA_DEVICE_ID)
+    # Isolated child process per document: see ingestion/ocr_worker.py for why (VRAM lifetime).
+    from ingestion.ocr_worker import IsolatedPDFParser
+    return IsolatedPDFParser(use_cuda=settings.ENABLE_GPU_PASSTHRU, device_id=settings.CUDA_DEVICE_ID)
 
 
 def get_masker() -> Any:

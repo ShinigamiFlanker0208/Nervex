@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     CONTAINER_CPU_QUOTA: int = 100000  # Default cgroups CPU cap
     ENABLE_GPU_PASSTHRU: bool = True
     MAX_UPLOAD_MB: int = 50
+    # OCR (Marker/Surya) spawns its own vLLM container. Its default grabs 85% of VRAM, which OOM-kills
+    # Surya's own sidecar models on an 8 GB card and would starve the sandbox. The OCR model is ~1.3 GB.
+    OCR_GPU_MEMORY_UTILIZATION: float = 0.5
+    OCR_TIMEOUT_SECONDS: int = 1500
+    OCR_CACHE_DIR: Path = Path(__file__).parent.resolve() / "data" / "ocr_cache"
+    # Parallel LLM entity-extraction calls. A 550B thinking model takes ~30 s/chunk, so 67 chunks
+    # sequentially is ~40 min. Lower this if your NIM key is rate-limited (HTTP 429).
+    EXTRACTION_CONCURRENCY: int = 6
     API_HOST: str = "127.0.0.1"  # loopback by default: this API can run code on your GPU
     API_PORT: int = 8000
     

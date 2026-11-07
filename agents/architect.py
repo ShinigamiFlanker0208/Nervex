@@ -6,6 +6,7 @@ enforcing explicit tensor dimensionality annotations (e.g., `# [B, H, S, D] -> [
 every planned layer to eliminate tensor hallucination errors downstream.
 """
 
+import os
 from typing import Dict, Any
 
 # TODO: Import LLM interfaces (Gemini / Groq / OpenAI)
@@ -30,7 +31,7 @@ class ArchitectAgent:
 
         self.llm =ChatNVIDIA(
           model="nvidia/nemotron-3-ultra-550b-a55b",
-          api_key="$NVIDIA_API_KEY",
+          api_key=os.environ.get("NVIDIA_API_KEY"),  # was the literal string "$NVIDIA_API_KEY" (never expanded -> 401)
           temperature=0.1,
           top_p=0.95,
           max_tokens=16384,
@@ -48,7 +49,7 @@ class ArchitectAgent:
 
                    Return your response strictly in two blocks:
                    1. A Python code block with the class skeleton.
-                   2. A JSON block mapping the expected input tensor shapes (e.g. {{"x": [32, 12, 512]}}).
+                   2. A JSON block mapping the expected input tensor shapes (e.g. {{"x": [32, 12, 512]}}). Use the EXACT forward() argument names as keys, small shapes (batch <= 4, sequence <= 128), and append a dtype word only for non-float inputs (e.g. {{"mask": "[4, 1, 1, 128] bool", "ids": "[4, 128] int64"}}). In the skeleton, give every __init__ parameter a default from the paper hyperparameters so the class can be built with no arguments.
                    """)
         ])
 

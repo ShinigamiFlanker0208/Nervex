@@ -66,6 +66,8 @@ class CodeGenerationResponse(BaseModel):
     execution_status: str
     tensor_shape_traces: Dict[str, Any] = Field(default_factory=dict, description="Captured layer telemetry tooltips")
     error_logs: List[Dict[str, Any]] = Field(default_factory=list)
+    error_type: Optional[str] = Field(None, description="Set when the orchestrator itself failed (timeout, loop, crash)")
+    error_details: Optional[str] = None
 
 
 # =====================================================================

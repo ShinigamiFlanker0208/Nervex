@@ -19,10 +19,23 @@ Catastrophes this module prevents:
     Chroma uses upsert, so re-ingestion is idempotent.
 """
 import hashlib
+import threading
+import time
+from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 ProgressFn = Callable[[str], None]
+RETRIES = 3
+RETRY_BACKOFF_S = 2.0
+
+
+def pick_title(schemas: List[Any], fallback: str) -> str:
+    """Majority vote over per-chunk titles. The first chunk is often a copyright/permission notice,
+    so trusting schemas[0] (as the merge does) can label a paper 'Google Permission Notice...'."""
+    votes = Counter(t.strip() for t in (getattr(x, "paper_title", "") for x in schemas) if t and t.strip())
+    return votes.most_common(1)[0][0] if votes else fallback
 
 
 def compute_paper_id(pdf_path: Path) -> str:
@@ -52,6 +65,7 @@ def ingest_pdf(
     graph_db: Any,
     vector_db: Any,
     on_progress: Optional[ProgressFn] = None,
+    max_workers: int = 1,
 ) -> Dict[str, Any]:
     """Run the full ingestion. Returns a dict matching api.schemas.IngestionResponse."""
     say = on_progress or (lambda _msg: None)
@@ -78,14 +92,32 @@ def ingest_pdf(
     for c in chunks:
         c["chunk_id"] = f"{paper_id}_{c['chunk_id']}"  # paper-scoped, see module docstring
 
-    say(f"extracting entities from {len(chunks)} chunks")
-    schemas, failed = [], 0
-    for i, chunk in enumerate(chunks):
-        try:
-            schemas.append(extractor.extract_from_chunk(chunk["content"], _vault_for_chunk(chunk, vault)))
-        except Exception as exc:  # LLM/validation failures are per-chunk, not fatal
-            failed += 1
-            say(f"chunk {i} extraction failed: {type(exc).__name__}: {exc}")
+    say(f"extracting entities from {len(chunks)} chunks ({max_workers} parallel)")
+    done, lock = [0], threading.Lock()
+
+    def work(i_chunk):
+        i, chunk = i_chunk
+        out, err = None, None
+        for attempt in range(1, RETRIES + 1):
+            try:
+                out = extractor.extract_from_chunk(chunk["content"], _vault_for_chunk(chunk, vault))
+                err = None
+                break
+            except Exception as exc:  # LLM/validation failures are per-chunk, not fatal
+                err = f"chunk {i} extraction failed (attempt {attempt}/{RETRIES}): {type(exc).__name__}: {exc}"
+                if attempt < RETRIES:
+                    time.sleep(RETRY_BACKOFF_S * attempt)   # NIM backends are occasionally flaky (seen: 400 on 1/68)
+        with lock:
+            done[0] += 1
+            say(err or f"extracted {done[0]}/{len(chunks)}")
+        return out
+
+    # pool.map yields results in INPUT order, so the merge (first-seen node wins) is deterministic
+    # regardless of which LLM call finishes first.
+    with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
+        results = list(pool.map(work, enumerate(chunks)))
+    schemas = [r for r in results if r is not None]
+    failed = len(results) - len(schemas)
     if not schemas:
         raise RuntimeError(f"Entity extraction failed for all {len(chunks)} chunks")
 
@@ -100,7 +132,7 @@ def ingest_pdf(
 
     return {
         "paper_id": paper_id,
-        "paper_title": merged.paper_title or title_guess,
+        "paper_title": pick_title(schemas, merged.paper_title or title_guess),
         "num_pages": num_pages,
         "num_entities_extracted": graph_counts.get("nodes", 0),
         "num_relationships_merged": graph_counts.get("edges", 0),

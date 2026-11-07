@@ -104,7 +104,11 @@ class ResearcherAgent:
                 # Map the hyperparameter name to its value (if it has one)
                 name = node_props.get("name", "unknown")
                 # We just store whatever is inside its properties (or True if it's just a flag)
-                hyperparameters[name] = inner_props
+                # The extractor stores the VALUE in the node description ("h = 8 parallel heads"), not in
+                # `properties` (which is usually empty), so pass the description through or no agent ever
+                # sees the paper's defaults.
+                desc = (node_props.get("description") or "").strip()
+                hyperparameters[name] = {**inner_props, **({"description": desc} if desc else {})}
 
         # 4. Finally, return the partial State dictionary!
         # LangGraph will automatically take these keys and merge them into the master SoulGraphState

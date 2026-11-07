@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     print("--- [SoulGraph] Initiating system startup & readiness checks ---")
     settings.create_directories()
+    from ingestion.ocr_worker import remove_stale_ocr_servers
+    stale = await asyncio.to_thread(remove_stale_ocr_servers)   # orphan OCR GPU containers from a crashed run
+    if stale:
+        log.warning("removed %d stale OCR server container(s)", stale)
     status_ = await _probe_subsystems()
     for name in ("neo4j", "docker", "sandbox_image", "cuda"):
         if not status_.get(name):
@@ -75,6 +79,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     print("--- [SoulGraph] Shutting down resources ---")
+    await asyncio.to_thread(remove_stale_ocr_servers)
     if deps.get_graph_db.cache_info().currsize:   # only close it if it was ever opened
         try:
             deps.get_graph_db().close()

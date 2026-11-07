@@ -42,3 +42,40 @@ def test_graph_search_failure_does_not_kill_the_run():
     a = agent({"x"}); a.graph_db.search_nodes = lambda *x, **k: (_ for _ in ()).throw(ConnectionError("down"))
     out = asyncio.run(a.run({"target_component": "x"}))
     assert out["relevant_formulas"] == ["x*sigmoid(x)"]
+
+
+def test_graph_manager_verify_and_close_contract():
+    """Regression: verify_connection used to return None always; close() never closed the driver."""
+    from db.graph_db import Neo4jGraphManager
+
+    class Sess:
+        def __init__(self, ok): self.ok = ok
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def run(self, q):
+            if not self.ok: raise ConnectionError("down")
+            class R:
+                def single(self_): return {"test": 1}
+            return R()
+
+    class Drv:
+        closed = False
+        def __init__(self, ok): self.ok = ok
+        def session(self): return Sess(self.ok)
+        def close(self): Drv.closed = True
+
+    m = Neo4jGraphManager.__new__(Neo4jGraphManager)
+    m.driver = Drv(True);  assert m.verify_connection() is True
+    m.driver = Drv(False); assert m.verify_connection() is False
+    m.driver = Drv(True);  m.close(); assert Drv.closed is True
+
+
+def test_hyperparameter_description_reaches_agents():
+    """Live E2E: graph stores hyperparameters as names only ('h': {}); the value is in the description."""
+    class G2(G):
+        def query_graph_neighborhood(self, nid, depth=2):
+            return {"nodes": [{"id": "9", "properties": {"entity_type": "Hyperparameter", "name": "h",
+                    "description": "number of parallel attention heads, h = 8", "properties": "{}"}}], "edges": []}
+    a = ResearcherAgent.__new__(ResearcherAgent); a.graph_db, a.vector_db = G2(set()), V()
+    out = asyncio.run(a.run({"target_component": "x"}))
+    assert "h = 8" in out["hyperparameters"]["h"]["description"]

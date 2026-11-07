@@ -6,7 +6,9 @@ PyTorch/JAX backend scripts utilizing local GPU resources (RTX 4080/4090 pipelin
 Enforces non-root execution, cgroups CPU/RAM limits, and network isolation to preserve host machine integrity.
 """
 
+import keyword
 import os
+import re
 import asyncio
 import json
 import shutil
@@ -23,6 +25,65 @@ from docker.errors import DockerException, ContainerError, APIError
 # TODO: Import telemetry injection helpers and project settings
 from sandbox.telemetry import inject_telemetry_wrapper, get_telemetry_tracker_code
 from config import settings
+
+
+MAX_INPUT_ELEMENTS = 1 << 26   # 64M floats = 256 MB per input: an LLM typo must not OOM the GPU
+
+
+def parse_shape(shape_str: Any) -> Tuple[int, ...]:
+    """
+    Turn an LLM-authored shape into a tuple of positive ints.
+    Accepts "(32, 64, 512)", "[32, 64, 512]", "32,64,512", "32x64x512", "torch.Size([2, 3])", or a list/tuple.
+    Why deterministic parsing: the Architect is an LLM and does NOT follow the format reliably (it sent
+    "[32, 64, 512]" and the harness built `torch.randn[32, 64, 512]`). Since that input can't be fixed by the
+    Coder, the sandbox must be tolerant here or the loop burns every attempt on an unfixable error.
+    """
+    if isinstance(shape_str, (list, tuple)):
+        dims = [int(d) for d in shape_str]
+    else:
+        dims = [int(d) for d in re.findall(r"\d+", str(shape_str))]
+    if not dims:
+        raise ValueError(f"no dimensions found in shape {shape_str!r}")
+    if any(d <= 0 for d in dims):
+        raise ValueError(f"dimensions must be positive: {shape_str!r}")
+    numel = 1
+    for d in dims:
+        numel *= d
+    if numel > MAX_INPUT_ELEMENTS:
+        raise ValueError(f"shape {shape_str!r} has {numel} elements (> {MAX_INPUT_ELEMENTS})")
+    return tuple(dims)
+
+
+_DTYPE_WORDS = re.compile(r"\b(?:u?int\d*|long|bool|float\d*|half|double|bfloat16)\b", re.IGNORECASE)
+_ID_NAME = re.compile(r"(ids?|tokens?|indices|idx|labels?)$", re.IGNORECASE)
+
+
+def input_dtype(name: str, spec: Any) -> str:
+    """'float' | 'bool' | 'int'. Spec words win over name heuristics; default is float."""
+    words = " ".join(_DTYPE_WORDS.findall(str(spec))).lower()
+    if "bool" in words:
+        return "bool"
+    if "int" in words or "long" in words:
+        return "int"
+    if "float" in words or "half" in words or "double" in words:
+        return "float"
+    if "mask" in str(name).lower():
+        return "bool"
+    if _ID_NAME.search(str(name)):
+        return "int"
+    return "float"
+
+
+def input_expression(name: str, spec: Any) -> str:
+    """Python source building one dummy input on the GPU. Masks are all-False (nothing masked out)."""
+    dims = parse_shape(_DTYPE_WORDS.sub("", str(spec)) if not isinstance(spec, (list, tuple)) else spec)
+    args = ", ".join(str(d) for d in dims)
+    kind = input_dtype(name, spec)
+    if kind == "bool":
+        return f"torch.zeros({args}, dtype=torch.bool).cuda()"
+    if kind == "int":
+        return f"torch.randint(0, 8, ({args},)).cuda()"       # small ids: valid for any realistic vocab
+    return f"torch.randn({args}).cuda()"
 
 
 class DockerSandboxController:
@@ -74,7 +135,9 @@ class DockerSandboxController:
 
         input_lines=[]
         for var_name,shape_str in expected_inputs.items():
-            input_lines.append(f"{var_name}=torch.randn{shape_str}.cuda()")
+            if not str(var_name).isidentifier() or keyword.iskeyword(str(var_name)):
+                raise ValueError(f"input name {var_name!r} is not a valid Python identifier")
+            input_lines.append(f"{var_name}={input_expression(var_name, shape_str)}")
         inputs_code="\n        ".join(input_lines)
         inputs_dict_code="{" + ", ".join(f"{n!r}: {n}" for n in expected_inputs) + "}"
 
@@ -110,10 +173,14 @@ def run_test():
                 raise RuntimeError("No nn.Module class found in generated code!")
             model_cls=candidates[-1]
 
+            import inspect
+            _required=[n for i,(n,p) in enumerate(inspect.signature(model_cls.__init__).parameters.items())
+                       if i>0 and p.default is p.empty and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)]
+            if _required:
+                raise TypeError(model_cls.__name__ + ".__init__ requires " + str(_required) + " but the harness builds the model with NO arguments. Give every __init__ parameter a default value (use the paper's hyperparameters).")
             model=model_cls().cuda()
             # Feed ALL expected inputs. By keyword when every name is a forward() parameter,
             # otherwise positionally in the declared order.
-            import inspect
             _inputs={inputs_dict_code}
             _params=set(inspect.signature(model.forward).parameters)
             if _inputs and all(n in _params for n in _inputs):
@@ -165,8 +232,12 @@ if __name__ == "__main__":
         # TODO: Return formatted structured log result.
         """
         # Step 1: harness + telemetry injection (pure str -> str, raises ValueError if no `model(`)
-        harness=self._generate_execution_harness(code_string, expected_inputs)
-        harness=inject_telemetry_wrapper(harness)
+        try:
+            harness=self._generate_execution_harness(code_string, expected_inputs)
+            harness=inject_telemetry_wrapper(harness)
+        except ValueError as exc:
+            # Bad input spec / no forward call: report it like any failure so the Critic sees the reason.
+            return False, {"logs": f"INVALID SANDBOX INPUT: {exc}", "tensor_traces": {}}
 
         logs=""
         traces: Dict[str, Any] = {}

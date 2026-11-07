@@ -39,7 +39,7 @@ class CoderAgent:
 
         self.prompt = ChatPromptTemplate.from_messages([
             ("system",
-             "You are an expert PyTorch/JAX engineer. Your job is to take an architectural skeleton and implement the dense tensor mathematics inside the forward passes. Return ONLY the complete, runnable python code wrapped in a ```python block."),
+             "You are an expert PyTorch/JAX engineer. Your job is to take an architectural skeleton and implement the dense tensor mathematics inside the forward passes. Return ONLY the complete, runnable python code wrapped in a ```python block. HARNESS CONTRACT (your code is run automatically, nothing else is supplied): (1) the main nn.Module class is instantiated with NO arguments, so give EVERY __init__ parameter a default taken from the paper's hyperparameters (e.g. d_model=512, h=8); (2) define the top-level model class LAST, after any helper modules; (3) forward() receives the dummy inputs from the skeleton, by keyword name; inputs whose name contains 'mask' are boolean tensors (True = position is masked out), inputs named like ids/tokens/indices are int64."),
             ("human", """
             Target Component: {target_component}
             Architectural Skeleton:

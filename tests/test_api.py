@@ -132,3 +132,23 @@ def test_cors_is_not_wildcard(client):
     r = client.options("/", headers={"Origin": "http://evil.example", "Access-Control-Request-Method": "GET"})
     assert r.headers.get("access-control-allow-origin") != "*"
     assert "evil.example" not in (r.headers.get("access-control-allow-origin") or "")
+
+
+def test_graph_query_dedupes_edges_from_overlapping_paths(client, monkeypatch):
+    class G:
+        def query_graph_neighborhood(self, n, d):
+            e = {"id": "e1", "type": "X", "start": "a", "end": "b", "properties": {}}
+            return {"nodes": [], "edges": [e, dict(e), {**e, "id": "e2"}]}
+    monkeypatch.setattr(deps, "get_graph_db", lambda: G())
+    assert len(client.post("/api/v1/graph/query", json={"node_id": "a", "depth": 2}).json()["edges"]) == 2
+
+
+def test_generate_code_surfaces_orchestrator_failure_reason(client, monkeypatch):
+    """Regression: a 401 inside the graph came back as a bare CRITICAL_FAILURE with no reason."""
+    class O:
+        async def run_translation_loop(self, st):
+            return {**st, "execution_status": "CRITICAL_FAILURE", "error_type": "UNKNOWN_EXCEPTION",
+                    "error_details": "[401] Unauthorized"}
+    monkeypatch.setattr(deps, "get_orchestrator", lambda: O())
+    b = client.post("/api/v1/generate/code", json={"paper_id": "p", "target_component": "A"}).json()
+    assert b["execution_status"] == "CRITICAL_FAILURE" and "401" in b["error_details"]
