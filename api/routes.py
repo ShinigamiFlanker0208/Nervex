@@ -10,7 +10,7 @@ dependency comes from `api.deps` (lazy + monkeypatchable), every failure maps to
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile, status
 
@@ -19,7 +19,7 @@ from api.jobs import jobs
 from api.schemas import (
     AblationStudyRequest, AblationStudyResponse,
     CodeGenerationRequest, CodeGenerationResponse,
-    ExplainerChatRequest, ExplainerChatResponse,
+    ComponentSummary, ExplainerChatRequest, ExplainerChatResponse, GraphOverviewResponse, PaperSummary, RunAccepted, RunStatus,
     GraphNeighborhoodResponse, IngestionJobAccepted, IngestionJobStatus,
     KnowledgeGraphQueryRequest,
     TranspilationRequest, TranspilationResponse,
@@ -238,3 +238,104 @@ async def transpile_model_framework(request: TranspilationRequest) -> Transpilat
         runtime_verified=out.get("runtime_verified"), runtime_logs=out.get("runtime_logs", ""),
         output_shape=out.get("output_shape"),
     )
+
+
+# =====================================================================
+# UI read models: what has been ingested, and its drawable skeleton
+# =====================================================================
+
+async def _graph_call(fn, *args):
+    import asyncio
+    try:
+        return await asyncio.to_thread(fn, *args)
+    except Exception as exc:
+        log.exception("graph read failed")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Graph database error: {type(exc).__name__}")
+
+
+@router.get("/papers", response_model=List[PaperSummary], summary="Ingested papers")
+async def list_papers() -> List[PaperSummary]:
+    return [PaperSummary(**p) for p in await _graph_call(deps.get_graph_db().list_papers)]
+
+
+@router.get("/papers/{paper_id}/graph", response_model=GraphOverviewResponse,
+            summary="Best-connected entities of a paper and the edges among them")
+async def paper_graph(paper_id: str, limit: int = 120) -> GraphOverviewResponse:
+    sub = await _graph_call(deps.get_graph_db().paper_overview, paper_id, limit)
+    if not sub["nodes"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown paper_id.")
+    return GraphOverviewResponse(paper_id=paper_id, **sub)
+
+
+@router.get("/papers/{paper_id}/components", response_model=List[ComponentSummary],
+            summary="Architecture components you can generate code for")
+async def paper_components(paper_id: str, limit: int = 24) -> List[ComponentSummary]:
+    return [ComponentSummary(**c) for c in await _graph_call(deps.get_graph_db().top_components, paper_id, limit)]
+
+
+# =====================================================================
+# Live generation runs (same loop as /generate/code, but observable)
+# =====================================================================
+
+async def _drive_run(run_id: str, req: CodeGenerationRequest) -> None:
+    import asyncio
+    import time
+    from langgraph.errors import GraphRecursionError
+    from api.runs import runs, summarize
+
+    state = initial_state_for(req)
+    err_type = err_details = None
+    try:
+        async with deps.generation_lock:                      # queued until the GPU is free
+            runs.update(run_id, state="running", started_at=time.time())
+            runs.event(run_id, {"node": "start"})
+            orch = deps.get_orchestrator()
+            async with asyncio.timeout(settings.TRANSLATION_TIMEOUT_SECONDS):
+                async for chunk in orch.workflow.astream(state, config={"recursion_limit": 50}, stream_mode="updates"):
+                    for node, update in chunk.items():
+                        update = update or {}
+                        state.update(update)
+                        runs.event(run_id, summarize(node, update))
+    except TimeoutError:
+        err_type = "GLOBAL_TIMEOUT"
+    except GraphRecursionError:
+        err_type = "INFINITE_LOOP"
+    except Exception as exc:
+        log.exception("run failed")
+        err_type, err_details = "UNKNOWN_EXCEPTION", f"{type(exc).__name__}: {exc}"
+        state["execution_status"] = "CRITICAL_FAILURE"
+    if err_type and state.get("execution_status") in (None, "PENDING", "RUNTIME_ERROR", "STATIC_ANALYSIS_FAILED"):
+        state["execution_status"] = "FAILED"
+    result = CodeGenerationResponse(
+        paper_id=req.paper_id, target_component=req.target_component, target_framework=req.target_framework,
+        generated_code=state.get("current_code", ""), attempt_count=state.get("attempt_count", 0),
+        execution_status=state.get("execution_status", "UNKNOWN"),
+        tensor_shape_traces=state.get("tensor_shape_traces", {}) or {},
+        error_logs=state.get("execution_logs", []) or [], error_type=err_type, error_details=err_details)
+    runs.event(run_id, {"node": "end", "status": result.execution_status})
+    runs.update(run_id, state="done" if result.execution_status == "SUCCESS" else "failed", result=result.model_dump())
+
+
+@router.post("/generate/runs", status_code=status.HTTP_202_ACCEPTED, response_model=RunAccepted,
+             summary="Start an observable generation run (poll /generate/runs/{id})")
+async def start_run(request: CodeGenerationRequest) -> RunAccepted:
+    import asyncio
+    from api.runs import runs
+    rid = runs.create({"paper_id": request.paper_id, "target_component": request.target_component,
+                       "target_framework": request.target_framework})
+    task = asyncio.create_task(_drive_run(rid, request))
+    _RUN_TASKS.add(task)                                       # keep a reference or the task can be GC'd
+    task.add_done_callback(_RUN_TASKS.discard)
+    return RunAccepted(run_id=rid)
+
+
+_RUN_TASKS: set = set()
+
+
+@router.get("/generate/runs/{run_id}", response_model=RunStatus, summary="Run state + events since index N")
+async def run_status(run_id: str, since: int = 0) -> Dict[str, Any]:
+    from api.runs import runs
+    run = runs.get(run_id, since)
+    if run is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown run_id.")
+    return run

@@ -251,7 +251,7 @@ class Neo4jGraphManager:
 
     _REL_TYPE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
-    def replace_paper_schema(self, schema: Any, paper_id: str) -> Dict[str, int]:
+    def replace_paper_schema(self, schema: Any, paper_id: str, title: Optional[str] = None) -> Dict[str, int]:
         """
         Idempotent, atomic (re)write of ONE paper's subgraph.
 
@@ -282,8 +282,9 @@ class Neo4jGraphManager:
             c = tx.run(
                 """UNWIND $rows AS r
                    MERGE (n:Entity {node_id: r.node_id, paper_id: $pid})
-                   SET n.name = r.name, n.description = r.desc, n.entity_type = r.type, n.properties = r.props""",
-                rows=list(node_rows.values()), pid=paper_id).consume().counters.nodes_created
+                   SET n.name = r.name, n.description = r.desc, n.entity_type = r.type, n.properties = r.props,
+                       n.paper_title = $title""",
+                rows=list(node_rows.values()), pid=paper_id, title=title).consume().counters.nodes_created
             rels = 0
             for rel, rows in by_type.items():
                 rels += tx.run(
@@ -302,3 +303,56 @@ class Neo4jGraphManager:
         """Remove one paper's whole subgraph. Returns nodes deleted."""
         with self.driver.session(database=self.database) as session:
             return session.run("MATCH (n:Entity {paper_id: $pid}) DETACH DELETE n", pid=paper_id).consume().counters.nodes_deleted
+
+
+    # ------------------------------------------------------------------ read models for the UI
+    def list_papers(self) -> List[Dict[str, Any]]:
+        """One row per ingested paper: id, best-guess title, node/edge counts. The title is the `Paper`
+        entity with the most connections (the extractor emits many Paper nodes, one per cited work) only as a
+        fallback: ingest stores the voted title in `paper_title`."""
+        cypher = """
+        MATCH (n:Entity) WHERE n.paper_id IS NOT NULL
+        OPTIONAL MATCH (n)-[r]-()
+        WITH n.paper_id AS pid, n, count(r) AS deg
+        RETURN pid, count(n) AS nodes, sum(deg) / 2 AS edges, max(n.paper_title) AS stored_title,
+               collect({name: n.name, t: n.entity_type, deg: deg}) AS ns
+        """
+        out = []
+        with self.driver.session() as session:
+            for r in session.run(cypher):
+                papers = [x for x in r["ns"] if x["t"] == "Paper" and x["name"]]
+                title = r["stored_title"] or (max(papers, key=lambda x: x["deg"])["name"] if papers else r["pid"])
+                out.append({"paper_id": r["pid"], "title": title, "nodes": r["nodes"], "edges": int(r["edges"])})
+        return sorted(out, key=lambda p: -p["nodes"])
+
+    def paper_overview(self, paper_id: str, limit: int = 120) -> Dict[str, Any]:
+        """The `limit` best-connected entities of a paper plus the edges among them (a drawable skeleton,
+        not the whole hairball: a typical paper has ~1000 nodes)."""
+        limit = max(5, min(int(limit), 400))
+        node_q = """
+        MATCH (n:Entity {paper_id: $pid})
+        OPTIONAL MATCH (n)-[r]-()
+        WITH n, count(r) AS deg ORDER BY deg DESC LIMIT $limit
+        RETURN n.node_id AS id, n.name AS name, n.entity_type AS type, n.description AS description, deg AS degree
+        """
+        edge_q = """
+        MATCH (a:Entity {paper_id: $pid})-[r]->(b:Entity {paper_id: $pid})
+        WHERE a.node_id IN $ids AND b.node_id IN $ids
+        RETURN a.node_id AS source, b.node_id AS target, type(r) AS type
+        """
+        with self.driver.session() as session:
+            nodes = [dict(r) for r in session.run(node_q, pid=paper_id, limit=limit)]
+            ids = [n["id"] for n in nodes]
+            edges = [dict(r) for r in session.run(edge_q, pid=paper_id, ids=ids)] if ids else []
+        return {"nodes": nodes, "edges": edges}
+
+    def top_components(self, paper_id: str, limit: int = 24) -> List[Dict[str, Any]]:
+        """Candidate targets for code generation: ArchitectureComponent entities, best-connected first."""
+        cypher = """
+        MATCH (n:Entity {paper_id: $pid, entity_type: 'ArchitectureComponent'})
+        OPTIONAL MATCH (n)-[r]-()
+        WITH n, count(r) AS deg ORDER BY deg DESC LIMIT $limit
+        RETURN n.node_id AS id, n.name AS name, n.description AS description, deg AS degree
+        """
+        with self.driver.session() as session:
+            return [dict(r) for r in session.run(cypher, pid=paper_id, limit=max(1, min(int(limit), 100)))]

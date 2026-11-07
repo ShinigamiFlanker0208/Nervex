@@ -131,3 +131,56 @@ class TranspilationResponse(BaseModel):
     runtime_verified: Optional[bool] = Field(default=None, description="True/False = executed in the sandbox; null = not executed")
     runtime_logs: str = ""
     output_shape: Optional[Any] = None
+
+
+# =====================================================================
+# UI read models + live runs
+# =====================================================================
+
+class PaperSummary(BaseModel):
+    paper_id: str
+    title: str
+    nodes: int
+    edges: int
+
+
+class GraphOverviewNode(BaseModel):
+    id: str
+    name: Optional[str] = None
+    type: Optional[str] = None
+    description: Optional[str] = None
+    degree: int = 0
+
+
+class GraphOverviewEdge(BaseModel):
+    source: str
+    target: str
+    type: str
+
+
+class GraphOverviewResponse(BaseModel):
+    paper_id: str
+    nodes: List[GraphOverviewNode]
+    edges: List[GraphOverviewEdge]
+
+
+class ComponentSummary(BaseModel):
+    id: str
+    name: Optional[str] = None
+    description: Optional[str] = None
+    degree: int = 0
+
+
+class RunAccepted(BaseModel):
+    run_id: str
+
+
+class RunStatus(BaseModel):
+    run_id: str
+    state: str                          # queued | running | done | failed
+    meta: Dict[str, Any] = Field(default_factory=dict)
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+    total_events: int = 0
+    started_at: Optional[float] = None
+    created_at: float = 0
+    result: Optional[CodeGenerationResponse] = None

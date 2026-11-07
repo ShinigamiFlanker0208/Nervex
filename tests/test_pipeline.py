@@ -32,7 +32,7 @@ class FakeExtractor:
     def merge_subgraph_schemas(self, s): return SimpleNamespace(paper_title="Merged", nodes=s, edges=[])
 
 class FakeGraph:
-    def replace_paper_schema(self, s, paper_id): return {"nodes": len(s.nodes), "edges": 0}
+    def replace_paper_schema(self, s, paper_id, title=None): return {"nodes": len(s.nodes), "edges": 0}
 
 class FakeVec:
     def __init__(self): self.chunks = None
@@ -96,7 +96,7 @@ def test_parallel_extraction_preserves_order_and_reports_progress(tmp_path):
                on_progress=msgs.append, max_workers=4)
     assert msgs[-2] == "extracted 8/8" or "extracted 8/8" in msgs
     ex = Slow(); ex.merge_subgraph_schemas = lambda s: SimpleNamespace(paper_title="M", nodes=[n for x in s for n in x.nodes], edges=[])
-    out = ingest_pdf(pdf, FakeParser(), FakeMasker(), FakeChunker(8), ex, type("G", (), {"replace_paper_schema": lambda s, m, pid: captured.append(m.nodes) or {"nodes": 8, "edges": 0}})(), FakeVec(), max_workers=4)
+    out = ingest_pdf(pdf, FakeParser(), FakeMasker(), FakeChunker(8), ex, type("G", (), {"replace_paper_schema": lambda s, m, pid, title=None: captured.append(m.nodes) or {"nodes": 8, "edges": 0}})(), FakeVec(), max_workers=4)
     assert captured[0] == [f"c{i}" for i in range(8)]     # input order, not completion order
 
 captured = []
@@ -145,7 +145,7 @@ def test_rate_limit_is_retried_with_shared_cooldown_then_succeeds(tmp_path):
 def test_too_lossy_extraction_raises_before_persisting(tmp_path):
     persisted = []
     class G(FakeGraph):
-        def replace_paper_schema(self, s, pid): persisted.append(1); return {"nodes": 1, "edges": 0}
+        def replace_paper_schema(self, s, pid, title=None): persisted.append(1); return {"nodes": 1, "edges": 0}
     pdf = tmp_path / "a.pdf"; pdf.write_bytes(b"%PDF-1.4 hello")
     ex = FakeExtractor(fail_on={f"c{i}" for i in range(1, 6)})        # 5 of 6 chunks fail
     with pytest.raises(RuntimeError, match="too lossy"):

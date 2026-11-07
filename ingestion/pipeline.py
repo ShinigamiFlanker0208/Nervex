@@ -148,7 +148,8 @@ def ingest_pdf(
     merged = extractor.merge_subgraph_schemas(schemas)
 
     say("persisting")
-    graph_counts = graph_db.replace_paper_schema(merged, paper_id)   # atomic, idempotent per paper
+    title = pick_title(schemas, merged.paper_title or title_guess)
+    graph_counts = graph_db.replace_paper_schema(merged, paper_id, title)   # atomic, idempotent per paper
     vector_db.add_chunks(chunks)
 
     page_count = meta.get("page_stats") or meta.get("pages") or []
@@ -156,7 +157,7 @@ def ingest_pdf(
 
     return {
         "paper_id": paper_id,
-        "paper_title": pick_title(schemas, merged.paper_title or title_guess),
+        "paper_title": title,
         "num_pages": num_pages,
         "num_entities_extracted": graph_counts.get("nodes", 0),
         "num_relationships_merged": graph_counts.get("edges", 0),
