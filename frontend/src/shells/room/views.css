@@ -71,3 +71,13 @@
 .pv-tablewrap { overflow-x:auto; margin:0 0 1.2em; } .pv-tbl { border-collapse:collapse; font:.86rem/1.45 Georgia,serif; width:100%; }
 .pv-tbl th, .pv-tbl td { border-bottom:1px solid var(--line); padding:6px 10px; text-align:left; vertical-align:top; } .pv-tbl th { border-bottom:1.5px solid var(--ink); font-weight:600; }
 .pv-disp { display:block; overflow-x:auto; margin:.6em 0; } .pv-tex .katex { font-size:1em; }
+
+/* containment: a grid track of 1fr grows to its widest child (long code lines) and slid under the margin */
+.nb-entry { grid-template-columns:108px minmax(0,1fr); } .nb-body, .mg-ms, .nb { min-width:0; }
+.nb .mg-codebox, .nb .rr-diff, .nb pre { max-width:100%; overflow-x:auto; }
+.nb .nx-line { min-width:max-content; } .nb .nx-tagname { position:sticky; right:0; background:linear-gradient(90deg,transparent,#faf4e8 18px); padding-left:24px; }
+.mg-margin { background:var(--paper); z-index:3; position:sticky; }
+.mg-codebox { transition:max-height .45s cubic-bezier(.22,.8,.24,1), box-shadow .3s; }
+.mg-grid > * { transition:opacity .35s ease; }
+.nb .nx-line:not(.is-tag) .nx-tagname { display:none; }   /* label once, on the comment line itself */
+.nb .nx-line.is-tag .nx-tagname { opacity:.9; }
