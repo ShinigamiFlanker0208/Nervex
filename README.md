@@ -54,8 +54,8 @@ docker run -d --name nervex-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/
 # 2. sandbox image (one-time, several GB)
 docker build -f sandbox/Dockerfile.sandbox -t soulgraph-runtime:latest .
 
-# 3. run
-uv run python main.py           # API on http://127.0.0.1:8000  (interactive docs at /docs)
+# 3. run everything (Neo4j + API + UI), URLs are printed; Ctrl-C stops it all
+./nervex.sh                     # or: ./nervex.sh --no-ui   (API only)
 ```
 
 **UI (alpha, three design directions to choose from):**

@@ -16,3 +16,4 @@ data/ocr_cache/
 frontend/node_modules/
 frontend/dist/
 data/runs/
+.nervex-logs/
