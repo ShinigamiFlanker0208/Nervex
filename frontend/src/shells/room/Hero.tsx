@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Workspace } from "../../data/useWorkspace";
 import { ForceSim } from "../../lib/forceSim";
 import { sampleText } from "./inkText";
-import { sampleBrain } from "./brain";
+import { makeBrain, project, view } from "./brain3d";
 import { IngestPanel } from "../../ui/shared";
 import "./hero.css";
 
@@ -35,7 +35,11 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
     const T = [0, 1, 2, 3].map(() => new Float32Array(N * 2));          // target positions per scene
     const A = [0, 1, 2, 3].map(() => new Float32Array(N));              // target alpha per scene
     const R = [0, 1, 2, 3].map(() => new Float32Array(N));              // target radius per scene
-    const BRAIN = new Float32Array(N * 2), WORD = new Float32Array(N * 2); const born = performance.now();
+    const WORD = new Float32Array(N * 2); let born = -1;   // the clock starts on the first frame after layout
+    const BN = 17000, B3 = makeBrain(BN); const PR = new Float32Array(5); const VIS = new Float32Array(N).fill(1); const ORDER = new Float32Array(N);
+    const BX = new Float32Array(BN * 2), BD = new Float32Array(BN * 2); { let q = 41; const r = () => ((q = (q * 16807) % 2147483647) / 2147483647); for (let i = 0; i < BN; i++) { BD[i * 2] = r(); BD[i * 2 + 1] = r(); } }
+    const SRC = (i: number) => (i * 4.61) | 0;   // the brain grain each word particle is born from
+    const delay = new Float32Array(N); { let q = 3; const r = () => ((q = (q * 16807) % 2147483647) / 2147483647); for (let i = 0; i < N; i++) { delay[i] = r(); ORDER[i] = r(); } }
     const fire = new Float32Array(N);                                       // neuron 'firing' during the brain phase
     let graphIdx: { id: string; name: string; type: string; deg: number }[] = [];
     let edges: [number, number][] = [];
@@ -46,8 +50,7 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
       rnd = (() => { let s = 99; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
       // scene 0: the word
       const word = await sampleText("Nervex", W, H * .62, N, Math.min(W * .27, 330));
-      const brain = sampleBrain(W, H, N);
-      for (let i = 0; i < N; i++) { WORD[i * 2] = word[i * 2]; WORD[i * 2 + 1] = word[i * 2 + 1] + H * .1; BRAIN[i * 2] = brain[i * 2]; BRAIN[i * 2 + 1] = brain[i * 2 + 1]; A[0][i] = .92; R[0][i] = 1.35; }
+      for (let i = 0; i < N; i++) { WORD[i * 2] = word[i * 2]; WORD[i * 2 + 1] = word[i * 2 + 1] + H * .1; A[0][i] = .92; R[0][i] = 1.35; }
       T[0].set(WORD);
       // scene 1: the real graph (first K particles), the rest are quiet dust
       const g = live.current.graph;
@@ -98,12 +101,48 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
     const frame = (now: number) => {
       if (dead) return; raf = requestAnimationFrame(frame);
       // the page opens as a brain assembling from dust, a few neurons fire, then the ink reflows into the word
-      const age = now - born, inBrain = !reduce && age < 3300;
-      if (inBrain) { T[0].set(BRAIN); if (age > 900 && Math.random() < .5) fire[(Math.random() * N) | 0] = 1; } else if (T[0][0] !== WORD[0]) T[0].set(WORD);
+      ctx.clearRect(0, 0, W, H);
+      // INTRO (only at the top of the page): dust gathers into a turning 3D brain; a sweep breaks it apart;
+      // grains drift as dust, and one grain in ~4.6 integrates into the word. Reduced motion: straight to the word.
+      if (born < 0 && S.ready) born = now;
+      const age = born < 0 ? 0 : now - born, FORM = 2800, HOLD = 5600, SWEEP = 1500, FLY = 1300, END = HOLD + SWEEP + FLY + 600;
+      const inBrain = !reduce && age < END && S.p < .02;
+      const V = view(.42 + Math.sin(age / 2600) * .3, .38 + Math.sin(age / 3300) * .05, W / 2, H * .45, Math.min(W * .22, H * .3));
+      const breakAt = (sx: number, o: number) => clamp((age - HOLD - clamp((sx - W * .3) / (W * .4)) * SWEEP - o * 260) / FLY);
+      if (inBrain) {
+        // the brain itself: 12k stipple grains, back faces culled, ink by shade + sulci
+        for (let b = 0; b < B3.n; b++) {
+          project(B3, b, V, PR);
+          const formT = smooth(clamp((age - BD[b * 2] * 1400) / (FORM - 1400)));
+          const bt = breakAt(PR[0], BD[b * 2 + 1]);
+          const dx = W * (.1 + BD[b * 2] * .8), dy = H * (.1 + BD[b * 2 + 1] * .8);
+          let px = dx + (PR[0] - dx) * formT, py = dy + (PR[1] - dy) * formT;
+          if (bt > 0) { const e = smooth(bt); px += Math.cos(BD[b * 2] * 50) * 120 * e; py += -90 * e + Math.sin(BD[b * 2 + 1] * 40) * 70 * e; }
+          BX[b * 2] = px; BX[b * 2 + 1] = py;
+          const facing = clamp(PR[3] * 3 + .35);                             // fades to 0 on the far side
+          const ink = .3 + .42 * (1 - PR[4]) + .55 * B3.fold[b];   // ambient + shadow side + sulci: engraving contrast
+          const a = facing * ink * formT * (1 - bt) * (.55 + .45 * formT);
+          if (a < .02) continue;
+          ctx.globalAlpha = Math.min(.95, a); ctx.fillStyle = "#1b1612";
+          const sz = (1.15 + .85 * B3.fold[b]) * PR[2]; ctx.fillRect(px - sz / 2, py - sz / 2, sz, sz);
+        }
+        ctx.globalAlpha = 1;
+        // neurons firing: a few grains flare red along the surface while it holds
+        if (age > FORM && age < HOLD) for (let k = 0; k < 3; k++) { const b = (Math.random() * B3.n) | 0; project(B3, b, V, PR); if (PR[3] > .1) { ctx.fillStyle = "#b3262e"; ctx.globalAlpha = .9; ctx.beginPath(); ctx.arc(BX[b * 2], BX[b * 2 + 1], 2.2, 0, 6.2832); ctx.fill(); ctx.globalAlpha = 1; } }
+        // the word's particles: hidden inside the brain, released by the sweep, then fly into the letters
+        for (let i = 0; i < N; i++) {
+          const b = SRC(i) % B3.n; project(B3, b, V, PR);
+          const bt = breakAt(PR[0], BD[b * 2 + 1]);
+          VIS[i] = bt > 0 ? Math.min(1, bt * 3) : 0;
+          const e = smooth(bt), wx = WORD[i * 2], wy = WORD[i * 2 + 1], drift = Math.sin(bt * Math.PI);
+          T[0][i * 2] = BX[b * 2] + (wx - BX[b * 2]) * e + Math.cos(ORDER[i] * 40) * 60 * drift;
+          T[0][i * 2 + 1] = BX[b * 2 + 1] + (wy - BX[b * 2 + 1]) * e - 50 * drift;
+          if (bt <= 0) { x[i] = BX[b * 2]; y[i] = BX[b * 2 + 1]; vx[i] = 0; vy[i] = 0; }
+        }
+      } else if (T[0][0] !== WORD[0]) { T[0].set(WORD); VIS.fill(1); }
       for (let i = 0; i < N; i++) if (fire[i] > 0) fire[i] *= .93;
       if (introRef.current !== inBrain) { introRef.current = inBrain; setIntro(inBrain); }
       const pos = S.p * 3, s0 = Math.min(2, Math.floor(pos)), fr = smooth(clamp(pos - s0)); a0 = s0; a1 = s0 + 1; f = fr;
-      ctx.clearRect(0, 0, W, H);
       const mx = S.mouse.x, my = S.mouse.y, reach = 110;
       // edges (only while the graph shape is on screen)
       const ge = a0 === 0 ? f : a0 === 1 ? 1 - f : 0;
@@ -116,7 +155,7 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
       for (let i = 0; i < N; i++) {
         const tx = T[a0][i * 2] + (T[a1][i * 2] - T[a0][i * 2]) * f, ty = T[a0][i * 2 + 1] + (T[a1][i * 2 + 1] - T[a0][i * 2 + 1]) * f;
         const al = A[a0][i] + (A[a1][i] - A[a0][i]) * f, rad = R[a0][i] + (R[a1][i] - R[a0][i]) * f;
-        const k = reduce ? 1 : 0.06;
+        const k = reduce ? 1 : introRef.current ? .35 : 0.06;
         vx[i] += (tx - x[i]) * k; vy[i] += (ty - y[i]) * k; vx[i] *= reduce ? 0 : .84; vy[i] *= reduce ? 0 : .84;
         const dx = x[i] - mx, dy = y[i] - my, d2 = dx * dx + dy * dy;
         let h = 0;
@@ -127,7 +166,8 @@ export function Hero({ ws, onEnter }: { ws: Workspace; onEnter: () => void }) {
         // dust is nearly invisible until touched
         const A2 = Math.min(1, al + heat[i] * (al < .3 ? .75 : .25));
         ctx.fillStyle = col(heat[i] > .02 || (i < graphIdx.length && ws.litIds.has(graphIdx[i]?.id)) ? Math.max(heat[i], i < graphIdx.length && ws.litIds.has(graphIdx[i].id) ? .9 : 0) : 0);
-        ctx.globalAlpha = A2; ctx.beginPath(); ctx.arc(x[i], y[i], rad * (1 + heat[i] * .5), 0, 6.2832); ctx.fill();
+        const vis = introRef.current ? VIS[i] : 1; if (vis < .01) continue;
+        ctx.globalAlpha = A2 * vis; ctx.beginPath(); ctx.arc(x[i], y[i], rad * (1 + heat[i] * .5), 0, 6.2832); ctx.fill();
       }
       ctx.globalAlpha = 1;
       // red-pencil circle + name on the node under the cursor (graph scene)
