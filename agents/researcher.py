@@ -98,11 +98,14 @@ class ResearcherAgent:
 
             if entity_type == "Formula":
                 # Extract the formula string from the inner properties and add to our list
-                if "formula" in inner_props:
+                # The extractor stores LaTeX under "latex" (live graph: 98/125 Formula nodes). Looking only for
+                # "formula" meant NO equation ever reached the Coder. Accept both spellings.
+                tex = inner_props.get("latex") or inner_props.get("formula")
+                if tex:
                     # Prefix with the graph node id so the Coder can cite it as `# Implements: <Node_ID: ...>`
                     # (the Explainer binds code lines back to the paper through those tags).
                     nid = node_props.get("node_id")
-                    relevant_formulas.append(f"[{nid}] {inner_props['formula']}" if nid else inner_props["formula"])
+                    relevant_formulas.append(f"[{nid}] {tex}" if nid else tex)
 
             elif entity_type == "Hyperparameter":
                 # Map the hyperparameter name to its value (if it has one)

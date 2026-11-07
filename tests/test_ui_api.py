@@ -19,10 +19,10 @@ def client(monkeypatch):
 
 class FakeDB:
     def list_papers(self): return [{"paper_id": "p1", "title": "T", "nodes": 3, "edges": 2}]
-    def paper_overview(self, pid, limit):
+    def paper_overview(self, pid, limit, include=None):
         return {"nodes": [{"id": "a", "name": "A", "type": "Concept", "description": None, "degree": 2}] if pid == "p1" else [],
                 "edges": []}
-    def top_components(self, pid, limit): return [{"id": "mha", "name": "MHA", "description": "x", "degree": 9}]
+    def top_components(self, pid, limit): return [{"id": "mha", "name": "MHA", "description": "x", "degree": 9, "formulas": 3}]
 
 
 def test_papers_graph_components(client, monkeypatch):
@@ -30,6 +30,7 @@ def test_papers_graph_components(client, monkeypatch):
     assert client.get("/api/v1/papers").json()[0]["title"] == "T"
     assert client.get("/api/v1/papers/p1/graph").json()["nodes"][0]["id"] == "a"
     assert client.get("/api/v1/papers/nope/graph").status_code == 404
+    assert client.get("/api/v1/papers/p1/graph?include=x,y").status_code == 200
     assert client.get("/api/v1/papers/p1/components").json()[0]["id"] == "mha"
 
 

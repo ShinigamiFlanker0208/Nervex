@@ -11,6 +11,7 @@ from typing import Dict, Any, List
 # TODO: Import LLM interfaces and code extraction utilities
 from langchain_core.prompts import ChatPromptTemplate
 from agents.llm_factory import build_llm
+from agents.llm_retry import ainvoke_with_retry
 import json
 import re
 from agents.state import SoulGraphState
@@ -79,14 +80,14 @@ class CoderAgent:
         critic_feedback = state.get("critic_feedback","")
         chain = self.prompt | self.llm
 
-        response = await chain.ainvoke({
+        response = await ainvoke_with_retry(chain, {
             'structural_skeleton': structural_skeleton,
             'relevant_formulas': relevant_formulas,
             'target_component': target_component,
             'previous_code': previous_code,
             'critic_feedback': critic_feedback,
 
-        })
+        }, attempts=4)
         raw_text = response.content
 
         code_match = re.search(r'```python(.*?)```', raw_text, re.DOTALL | re.IGNORECASE)

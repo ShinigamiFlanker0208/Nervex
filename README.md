@@ -58,6 +58,13 @@ docker build -f sandbox/Dockerfile.sandbox -t soulgraph-runtime:latest .
 uv run python main.py           # API on http://127.0.0.1:8000  (interactive docs at /docs)
 ```
 
+**UI (alpha, three design directions to choose from):**
+
+```bash
+cd frontend && npm install && npm run dev      # http://localhost:5173  (proxies /api to :8000)
+# ?ui=synapse | ?ui=marginalia | ?ui=bench  (all three share one state, switch any time)
+```
+
 Check `GET /` — it reports live status of Neo4j, Docker, the sandbox image and CUDA.
 
 ## Choosing your LLM
@@ -78,6 +85,8 @@ Override the model with `LLM_MODEL`. Free tiers rate-limit hard: lower `EXTRACTI
 
 | Endpoint | Purpose |
 |---|---|
+| `GET  /papers`, `/papers/{id}/graph`, `/papers/{id}/components` | What is ingested, its drawable graph skeleton, and best generation targets |
+| `POST /generate/runs` + `GET /generate/runs/{id}?since=N` | Same loop as `/generate/code`, but observable: poll for new agent events |
 | `POST /ingest/pdf` | Upload a paper → `202` + `job_id` (ingestion takes minutes) |
 | `GET  /ingest/status/{job_id}` | Poll progress / result |
 | `POST /graph/query` | Neighbourhood of a graph node (pass `paper_id` to scope it) |

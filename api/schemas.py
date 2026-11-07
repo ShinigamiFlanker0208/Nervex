@@ -169,6 +169,7 @@ class ComponentSummary(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     degree: int = 0
+    formulas: int = 0   # Formula entities within 2 hops: more = richer, traceable code
 
 
 class RunAccepted(BaseModel):

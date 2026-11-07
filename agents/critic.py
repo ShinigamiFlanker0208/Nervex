@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
 from agents.llm_factory import build_llm
+from agents.llm_retry import ainvoke_with_retry
 import json
 import re
 from agents.state import SoulGraphState
@@ -96,10 +97,10 @@ Provide extremely concise instructions to the coder on exactly how to fix the co
             
         chain = self.prompt | self.llm
         
-        response = await chain.ainvoke({
+        response = await ainvoke_with_retry(chain, {
             "current_code": current_code,
             "traceback": traceback_str
-        })
+        }, attempts=4)
         
         return {
             "critic_feedback": response.content

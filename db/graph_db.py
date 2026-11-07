@@ -325,14 +325,21 @@ class Neo4jGraphManager:
                 out.append({"paper_id": r["pid"], "title": title, "nodes": r["nodes"], "edges": int(r["edges"])})
         return sorted(out, key=lambda p: -p["nodes"])
 
-    def paper_overview(self, paper_id: str, limit: int = 120) -> Dict[str, Any]:
+    def paper_overview(self, paper_id: str, limit: int = 120, include: Optional[List[str]] = None) -> Dict[str, Any]:
         """The `limit` best-connected entities of a paper plus the edges among them (a drawable skeleton,
-        not the whole hairball: a typical paper has ~1000 nodes)."""
+        not the whole hairball: a typical paper has ~1000 nodes). `include` force-adds specific node ids: a run
+        cites low-degree formula nodes that would never make the top-N, and the UI must be able to show them."""
         limit = max(5, min(int(limit), 400))
         node_q = """
         MATCH (n:Entity {paper_id: $pid})
         OPTIONAL MATCH (n)-[r]-()
         WITH n, count(r) AS deg ORDER BY deg DESC LIMIT $limit
+        RETURN n.node_id AS id, n.name AS name, n.entity_type AS type, n.description AS description, deg AS degree
+        """
+        extra_q = """
+        MATCH (n:Entity {paper_id: $pid}) WHERE n.node_id IN $ids
+        OPTIONAL MATCH (n)-[r]-()
+        WITH n, count(r) AS deg
         RETURN n.node_id AS id, n.name AS name, n.entity_type AS type, n.description AS description, deg AS degree
         """
         edge_q = """
@@ -342,17 +349,29 @@ class Neo4jGraphManager:
         """
         with self.driver.session() as session:
             nodes = [dict(r) for r in session.run(node_q, pid=paper_id, limit=limit)]
+            have = {n["id"] for n in nodes}
+            extra = [i for i in dict.fromkeys(include or []) if i not in have][:60]
+            if extra:
+                nodes += [dict(r) for r in session.run(extra_q, pid=paper_id, ids=extra)]
             ids = [n["id"] for n in nodes]
             edges = [dict(r) for r in session.run(edge_q, pid=paper_id, ids=ids)] if ids else []
         return {"nodes": nodes, "edges": edges}
 
     def top_components(self, paper_id: str, limit: int = 24) -> List[Dict[str, Any]]:
-        """Candidate targets for code generation: ArchitectureComponent entities, best-connected first."""
+        """Candidate targets for code generation, best first. Ranked by how many Formula entities sit within
+        2 hops (those become `# Implements:` tags in the code and light up the graph), then by connectivity.
+        Candidates are ArchitectureComponents plus any entity with formulas nearby (e.g. 'Multi-Head Attention'
+        is extracted as a Concept but is exactly what a user wants to generate)."""
         cypher = """
-        MATCH (n:Entity {paper_id: $pid, entity_type: 'ArchitectureComponent'})
+        MATCH (n:Entity {paper_id: $pid})
+        WHERE n.entity_type <> 'Paper' AND n.entity_type <> 'Formula'
+        OPTIONAL MATCH (n)-[*1..2]-(f:Entity {paper_id: $pid, entity_type: 'Formula'})
+        WITH n, count(DISTINCT f) AS formulas
         OPTIONAL MATCH (n)-[r]-()
-        WITH n, count(r) AS deg ORDER BY deg DESC LIMIT $limit
-        RETURN n.node_id AS id, n.name AS name, n.description AS description, deg AS degree
+        WITH n, formulas, count(r) AS deg
+        WHERE n.entity_type = 'ArchitectureComponent' OR formulas > 0
+        RETURN n.node_id AS id, n.name AS name, n.description AS description, deg AS degree, formulas
+        ORDER BY (formulas > 0) DESC, deg DESC LIMIT $limit
         """
         with self.driver.session() as session:
             return [dict(r) for r in session.run(cypher, pid=paper_id, limit=max(1, min(int(limit), 100)))]

@@ -11,3 +11,7 @@ data/chromadb/
 .idea/
 .DS_Store
 data/ocr_cache/
+
+# frontend
+frontend/node_modules/
+frontend/dist/

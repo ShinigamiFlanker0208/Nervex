@@ -79,3 +79,15 @@ def test_hyperparameter_description_reaches_agents():
     a = ResearcherAgent.__new__(ResearcherAgent); a.graph_db, a.vector_db = G2(set()), V()
     out = asyncio.run(a.run({"target_component": "x"}))
     assert "h = 8" in out["hyperparameters"]["h"]["description"]
+
+
+def test_latex_key_from_the_real_extractor_is_picked_up():
+    """Live bug: the extractor stores {"latex": "$...$"}; the Researcher only read "formula", so NO equation ever
+    reached the Coder (every run said 'pulled 0 formulas')."""
+    class G2(G):
+        def query_graph_neighborhood(self, nid, depth=2, paper_id=None):
+            return {"nodes": [{"id": "1", "properties": {"entity_type": "Formula", "name": "f", "node_id": "formula_w_q",
+                    "properties": json.dumps({"latex": "$W_i^Q \\in R^{d_{model} \\times d_k}$"})}}], "edges": []}
+    a = agent(set()); a.graph_db = G2(set())
+    out = asyncio.run(a.run({"target_component": "MHA"}))
+    assert out["relevant_formulas"] == ["[formula_w_q] $W_i^Q \\in R^{d_{model} \\times d_k}$"]

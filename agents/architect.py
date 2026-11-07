@@ -16,6 +16,7 @@ import json
 import re
 from agents.state import SoulGraphState
 from agents.llm_factory import build_llm
+from agents.llm_retry import ainvoke_with_retry
 
 
 
@@ -72,14 +73,13 @@ class ArchitectAgent:
 
         chain=self.prompt|self.llm
 
-        response= await chain.ainvoke({
+        response = await ainvoke_with_retry(chain, {
             "target_component": target_component,
             "paper_context": paper_context,
             "relevant_formulas": relevant_formulas,
             "hyperparameters": hyperparameters,
             "target_framework": target_framework
-        }
-        )
+        }, attempts=4)
         raw_text = response.content
 
         code_match = re.search(r'```python(.*?)```', raw_text, re.DOTALL | re.IGNORECASE)

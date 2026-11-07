@@ -260,8 +260,9 @@ async def list_papers() -> List[PaperSummary]:
 
 @router.get("/papers/{paper_id}/graph", response_model=GraphOverviewResponse,
             summary="Best-connected entities of a paper and the edges among them")
-async def paper_graph(paper_id: str, limit: int = 120) -> GraphOverviewResponse:
-    sub = await _graph_call(deps.get_graph_db().paper_overview, paper_id, limit)
+async def paper_graph(paper_id: str, limit: int = 120, include: str = "") -> GraphOverviewResponse:
+    ids = [i.strip() for i in include.split(",") if i.strip()][:60]
+    sub = await _graph_call(deps.get_graph_db().paper_overview, paper_id, limit, ids)
     if not sub["nodes"]:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown paper_id.")
     return GraphOverviewResponse(paper_id=paper_id, **sub)
