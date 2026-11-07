@@ -117,6 +117,9 @@ class TranspilationRequest(BaseModel):
     source_framework: str
     target_framework: str
     architecture_skeleton: str
+    expected_inputs: Optional[Dict[str, str]] = Field(
+        default=None, description="Dummy input shapes, e.g. {'x': '[2, 8, 64]'} (the `__model__.input` trace of a "
+                                  "generate run). When given, the transpiled code is EXECUTED in the sandbox.")
 
 
 class TranspilationResponse(BaseModel):
@@ -125,3 +128,6 @@ class TranspilationResponse(BaseModel):
     transpiled_code: str
     syntax_valid: bool
     notes: str
+    runtime_verified: Optional[bool] = Field(default=None, description="True/False = executed in the sandbox; null = not executed")
+    runtime_logs: str = ""
+    output_shape: Optional[Any] = None

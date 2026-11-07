@@ -8,7 +8,7 @@ _MESSAGES = {
     "timeout": "The language-model provider timed out. Retry in a moment.",
     "rate_limited": "The language-model provider is rate limiting this key. Wait and retry, or lower concurrency.",
     "upstream_error": "The language-model provider returned a server error.",
-    "upstream_auth": "The language-model provider rejected the API key (check NVIDIA_API_KEY).",
+    "upstream_auth": "The language-model provider rejected the API key (check the API key for your LLM_PROVIDER).",
     "connection": "Could not reach the language-model provider.",
 }
 

@@ -30,17 +30,29 @@ class FrameworkTranspiler:
         "- Data-dependent Python `if` on array values -> jax.lax.cond / jnp.where.\n"
         "- Keep EVERY `# Implements: <Node_ID: ...>` and `# [B, S, D] -> ...` comment verbatim.\n"
         "- Only import: torch, jax, equinox, einops, numpy, math, typing.\n"
+        "- The target model is RUN on batched dummy inputs with the same names/shapes as the source, so the "
+        "batch dimensions must work exactly like the PyTorch forward. Equinox layers (eqx.nn.Linear, LayerNorm, "
+        "Conv) act on ONE example, NOT on a batch: eqx.nn.Linear maps a single (in_features,) vector to "
+        "(out_features,). To apply one over [B, T, D] use one jax.vmap per leading axis "
+        "(jax.vmap(jax.vmap(layer))) or jnp.einsum with layer.weight / layer.bias (weight is shaped "
+        "(out, in), i.e. y = x @ weight.T + bias, same as torch). Never call it directly on a "
+        "batched array, and never vmap fewer times than there are leading axes.\n"
+        "- The top-level class must be constructible with NO arguments (give every __init__ parameter a default; "
+        "an optional `key` argument is allowed) and its __call__ takes the same inputs by the same names.\n"
         "Return ONLY the complete code in one ```python block, then a short '### Notes' list."
     )
 
-    def __init__(self, model_provider: str = "nvidia", llm: Any = None, critic: Any = None):
+    ATTEMPTS = 4   # each attempt may fail static analysis OR the sandbox run; the exact error is fed back
+
+    def __init__(self, model_provider: str = "nvidia", llm: Any = None, critic: Any = None, verifier: Any = None):
         """`llm` and `critic` are injectable for tests; defaults match the rest of Nervex (ChatNVIDIA)."""
         self.provider = model_provider
         if llm is None:
-            from langchain_nvidia_ai_endpoints import ChatNVIDIA
-            llm = ChatNVIDIA(model="nvidia/nemotron-3-ultra-550b-a55b", temperature=0.1, max_tokens=8192)
+            from agents.llm_factory import build_llm
+            llm = build_llm("transpiler")
         self.llm = llm
         self._critic = critic  # built lazily: only static analysis is needed
+        self._verifier = verifier  # async (code, framework, inputs) -> (ok, logs, shapes); lazy default below
 
     @staticmethod
     def normalize_framework(name: str) -> str:
@@ -57,6 +69,11 @@ class FrameworkTranspiler:
             self._critic = CriticAgent()
         return self._critic.run_static_analysis(code)
 
+    async def _verify_runtime(self, code: str, framework: str, inputs: Dict[str, str]):
+        if self._verifier is not None:
+            return await self._verifier(code, framework, inputs)
+        return await default_runtime_verifier(code, framework, inputs)
+
     @staticmethod
     def _split_reply(text: str):
         m = re.search(r"```python(.*?)```", text, re.DOTALL | re.IGNORECASE)
@@ -64,34 +81,72 @@ class FrameworkTranspiler:
         notes = text[m.end():].strip() if m else text.strip()
         return code, notes
 
-    async def transpile_model(self, source_code: str, source_framework: str, target_framework: str, architecture_skeleton: str) -> Dict[str, Any]:
+    async def transpile_model(self, source_code: str, source_framework: str, target_framework: str, architecture_skeleton: str,
+                              expected_inputs: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
         Converts full model source code from source framework to target framework while preserving math precision.
-        Returns: dict with `transpiled_code`, `source_framework`, `target_framework`, `syntax_valid`, `notes`.
+        Returns: dict with `transpiled_code`, `source_framework`, `target_framework`, `syntax_valid`, `notes`,
+        plus `runtime_verified` (True/False, or None when no `expected_inputs` were given so nothing was run),
+        `runtime_logs` and `output_shape`.
         """
         print(f"--- [Transpiler Engine] Converting architecture from {source_framework} -> {target_framework} ---")
         src, dst = self.normalize_framework(source_framework), self.normalize_framework(target_framework)
         if src == dst:
             return {"transpiled_code": source_code, "source_framework": src, "target_framework": dst,
-                    "syntax_valid": True, "notes": "Source and target frameworks are identical; returned unchanged."}
+                    "syntax_valid": True, "notes": "Source and target frameworks are identical; returned unchanged.",
+                    "runtime_verified": None, "runtime_logs": "", "output_shape": None}
 
         user_msg = (f"Translate from {src} to {dst}.\n\nArchitecture skeleton:\n{architecture_skeleton}\n\n"
                     f"Source code:\n```python\n{source_code}\n```")
         messages = [("system", self.SYSTEM_PROMPT), ("human", user_msg)]
 
         code, notes, valid, msg = "", "", False, ""
-        for attempt in range(3):  # up to two repair rounds, each fed the exact static-analysis failure
+        runtime_ok: Optional[bool] = None
+        runtime_logs, out_shape = "", None
+        for attempt in range(self.ATTEMPTS):  # repair rounds, each fed the exact failure (static OR runtime)
             reply = await ainvoke_with_retry(self.llm, messages)
-            code, notes = self._split_reply(reply.content if isinstance(reply.content, str) else str(reply.content))
+            text = reply.content if isinstance(reply.content, str) else str(reply.content)
+            code, notes = self._split_reply(text)
+            runtime_ok, runtime_logs, out_shape = None, "", None
             if not code:
                 valid, msg = False, "model returned no ```python block"
             else:
                 valid, msg = self._static_check(code)
-            if valid:
+                if valid and expected_inputs:
+                    runtime_ok, runtime_logs, shapes = await self._verify_runtime(code, dst, expected_inputs)
+                    out_shape = (shapes or {}).get("output")
+                    if not runtime_ok:
+                        msg = "it compiled but FAILED when executed on batched dummy inputs:\n" + runtime_logs[-1800:]
+            if valid and runtime_ok is not False:
                 break
-            messages = messages + [("ai", reply.content if isinstance(reply.content, str) else str(reply.content)),
-                                   ("human", f"That failed static analysis: {msg}. Return the corrected full code.")]
+            messages = messages + [("ai", text), ("human", f"That failed: {msg}\nReturn the corrected full code.")]
 
-        note_text = notes if valid else f"STATIC ANALYSIS FAILED: {msg}\n{notes}"
+        ok = valid and runtime_ok is not False
+        if ok:
+            note_text = notes if runtime_ok else (notes + "\n\nNOT EXECUTED: no expected_inputs were provided, so only static checks ran.").strip()
+        else:
+            note_text = f"{'RUNTIME' if valid else 'STATIC ANALYSIS'} FAILED: {msg}\n{notes}"
         return {"transpiled_code": code, "source_framework": src, "target_framework": dst,
-                "syntax_valid": valid, "notes": note_text}
+                "syntax_valid": valid, "notes": note_text, "runtime_verified": runtime_ok,
+                "runtime_logs": runtime_logs[-3000:], "output_shape": out_shape}
+
+
+async def default_runtime_verifier(code: str, framework: str, inputs: Dict[str, str]):
+    """Run `code` in the Docker sandbox with the framework's own harness.
+    JAX -> CPU smoke run; PyTorch -> the normal GPU harness (serialised by the API's generation_lock)."""
+    import asyncio
+    from sandbox.docker_controller import _get_controller
+
+    def _run():
+        ctl = _get_controller()
+        if framework == "JAX":
+            ok, res = ctl.run_jax_smoke(code, inputs)
+            return ok, res["logs"], res["shapes"]
+        ok, res = ctl.run_sandbox_execution(code, inputs)
+        return ok, res["logs"], (res.get("tensor_traces") or {}).get("__model__", {})
+
+    if framework == "JAX":
+        return await asyncio.to_thread(_run)
+    from api.deps import generation_lock
+    async with generation_lock:
+        return await asyncio.to_thread(_run)

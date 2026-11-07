@@ -106,8 +106,8 @@ class ExplainerChatAgent:
         """
         self.provider = model_provider
         if llm is None:
-            from langchain_nvidia_ai_endpoints import ChatNVIDIA
-            llm = ChatNVIDIA(model="nvidia/nemotron-3-ultra-550b-a55b", temperature=0.2, max_tokens=4096)
+            from agents.llm_factory import build_llm
+            llm = build_llm("chat")
         self.llm = llm
         self._tools = {
             "query_knowledge_graph": query_knowledge_graph,

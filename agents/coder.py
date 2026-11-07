@@ -10,7 +10,7 @@ from typing import Dict, Any, List
 
 # TODO: Import LLM interfaces and code extraction utilities
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from agents.llm_factory import build_llm
 import json
 import re
 from agents.state import SoulGraphState
@@ -29,13 +29,7 @@ class CoderAgent:
         """
         self.provider = model_provider
         # TODO: Configure code implementation prompt template
-        self.llm =ChatNVIDIA(
-          model="nvidia/nemotron-3-ultra-550b-a55b",
-          temperature=0.1,
-          top_p=0.95,
-          max_tokens=16384,
-          chat_template_kwargs={"enable_thinking":True},
-        )
+        self.llm = build_llm("coder")
 
         self.prompt = ChatPromptTemplate.from_messages([
             ("system",

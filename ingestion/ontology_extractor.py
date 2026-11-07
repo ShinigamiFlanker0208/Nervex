@@ -13,7 +13,7 @@ from dotenv import load_dotenv
 load_dotenv()
 import os
 # TODO: Import LLM client libraries or LangChain structured output wrappers
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from agents.llm_factory import build_llm
 from langchain_core.prompts import ChatPromptTemplate
 from config import settings
 
@@ -84,15 +84,7 @@ class OntologyExtractor:
         # TODO: Instantiate Groq or Gemini model based on config settings.
         # TODO: Configure structured output wrapper (.with_structured_output(PaperExtractionSchema)).
         """
-        model= ChatNVIDIA(
-          model="nvidia/nemotron-3-ultra-550b-a55b",
-          api_key=NVIDIA_API_KEY,
-          temperature=0.4,
-          top_p=0.95,
-          max_tokens=16384,
-          reasoning_budget=16384,
-          chat_template_kwargs={"enable_thinking":True},
-        )
+        model = build_llm("extractor")
 
         self.structured_llm=model.with_structured_output(PaperExtractionSchema)
 

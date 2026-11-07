@@ -11,7 +11,9 @@ import random
 import re
 from typing import Any, Optional, Tuple
 
-_STATUS = re.compile(r"\[(\d{3})\]")
+# Providers format the status differently: NVIDIA "[429] ...", OpenAI "Error code: 429 - ...",
+# Google "429 RESOURCE_EXHAUSTED ...".
+_STATUS = re.compile(r"\[(\d{3})\]|Error code: (\d{3})|^\s*(\d{3}) [A-Z_]{4,}")
 
 
 def classify(exc: BaseException) -> Tuple[Optional[int], str]:
@@ -20,9 +22,14 @@ def classify(exc: BaseException) -> Tuple[Optional[int], str]:
     msg = str(exc)
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)) or "Timeout" in name or "timed out" in msg.lower():
         return 504, "timeout"
+    low = msg.lower()
+    if "resource_exhausted" in low or "quota" in low and "exceed" in low:
+        return 429, "rate_limited"
+    if "api key not valid" in low or "permission_denied" in low or "unauthenticated" in low:
+        return 502, "upstream_auth"
     m = _STATUS.search(msg)
     if m:
-        code = int(m.group(1))
+        code = int(next(g for g in m.groups() if g))
         if code == 429:
             return 429, "rate_limited"
         if code >= 500:

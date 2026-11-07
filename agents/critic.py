@@ -11,7 +11,7 @@ import re
 from typing import Dict, Any, List, Tuple
 
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from agents.llm_factory import build_llm
 import json
 import re
 from agents.state import SoulGraphState
@@ -30,13 +30,7 @@ class CriticAgent:
         Initializes diagnostic LLM evaluation utilities.
         """
         self.provider = model_provider
-        self.llm = ChatNVIDIA(
-          model="nvidia/nemotron-3-ultra-550b-a55b",
-          temperature=0.1,
-          top_p=0.95,
-          max_tokens=16384,
-          chat_template_kwargs={"enable_thinking":True},
-        )
+        self.llm = build_llm("critic")
         self.prompt = ChatPromptTemplate.from_messages([
             ("system",
              "You are a senior deep learning debugging assistant. Your job is to analyze PyTorch/JAX execution errors and provide exact, step-by-step reasoning on how to fix tensor shape mismatches or syntax bugs."),

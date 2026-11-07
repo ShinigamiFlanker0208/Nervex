@@ -36,7 +36,7 @@ RATE_LIMIT_MAX_S = 60.0
 
 def is_rate_limited(exc: BaseException) -> bool:
     msg = str(exc).lower()
-    return "429" in msg or "too many requests" in msg or "rate limit" in msg
+    return "429" in msg or "too many requests" in msg or "rate limit" in msg or "resource_exhausted" in msg
 
 
 def pick_title(schemas: List[Any], fallback: str) -> str:

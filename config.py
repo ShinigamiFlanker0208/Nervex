@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     DEBUG: bool = True
     ENVIRONMENT: str = "local_development"
 
+    # Plug-and-play LLM provider (see agents/llm_factory.py)
+    LLM_PROVIDER: str = Field(default="nvidia", description="nvidia | google | openai | openai_compatible | ollama")
+    LLM_MODEL: Optional[str] = Field(default=None, description="Override the provider's default model")
+    LLM_API_KEY: Optional[str] = Field(default=None, description="Overrides the provider-specific key")
+    LLM_BASE_URL: Optional[str] = Field(default=None, description="openai_compatible / ollama / self-hosted NIM endpoint")
+    NVIDIA_API_KEY: Optional[str] = None
+    GOOGLE_API_KEY: Optional[str] = None
+
     # API Keys for LLM Extraction & LangGraph Loop
     GROQ_API_KEY: Optional[str] = Field(default=None, description="Groq API Key for fast Pydantic extraction")
     GEMINI_API_KEY: Optional[str] = Field(default=None, description="Gemini API Key for advanced multimodal reasoning")

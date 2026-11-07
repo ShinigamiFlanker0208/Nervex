@@ -233,3 +233,59 @@ def test_model_boundary_shapes_always_traced(tmp_path, controller):
     import json
     tr = json.loads(line[len("NERVEX_TRACES="):])
     assert tr["__model__"] == {"input": {"x": [2, 3, 4]}, "output": [[2, 3, 4], {"aux": [2, 3]}]}
+
+
+# ---- JAX smoke harness (pure string + local exec when jax/equinox exist) -----------------------
+JAX_OK = textwrap.dedent("""\
+    import equinox as eqx
+    import jax
+    import jax.numpy as jnp
+
+    class Lin(eqx.Module):
+        w: jax.Array
+        def __init__(self, d=4, key=None):
+            key = key if key is not None else jax.random.PRNGKey(0)
+            self.w = jax.random.normal(key, (d, d))
+        def __call__(self, x, mask=None):
+            return x @ self.w
+""")
+
+
+def test_jax_harness_compiles_and_rejects_bad_input(controller):
+    h = controller._generate_jax_harness(JAX_OK, {"x": "[2, 3, 4]", "mask": "[2, 3, 4]"})
+    compile(h, "main_run.py", "exec")
+    assert "jnp.zeros((2, 3, 4), dtype=jnp.bool_)" in h
+    with pytest.raises(ValueError):
+        controller._generate_jax_harness(JAX_OK, {"x; import os": "[2]"})
+
+
+def test_run_jax_smoke_reports_invalid_spec(controller):
+    ok, res = controller.run_jax_smoke(JAX_OK, {"x": "garbage"})
+    assert ok is False and "INVALID SANDBOX INPUT" in res["logs"]
+
+
+def _run_jax(tmp_path, controller, code, inputs):
+    (tmp_path / "main_run.py").write_text(controller._generate_jax_harness(code, inputs))
+    p = subprocess.run([sys.executable, "main_run.py"], cwd=tmp_path, capture_output=True, text=True)
+    return p.returncode, p.stdout + p.stderr
+
+
+def test_jax_harness_runs_batched_and_reports_shapes(tmp_path, controller):
+    pytest.importorskip("equinox")
+    rc, out = _run_jax(tmp_path, controller, JAX_OK, {"x": "[2, 3, 4]"})
+    assert rc == 0 and 'NERVEX_JAX={"input": {"x": [2, 3, 4]}, "output": [2, 3, 4]}' in out, out
+
+
+def test_jax_harness_catches_the_vmap_bug_we_saw_live(tmp_path, controller):
+    """Live E2E: jax.vmap(self.w_q) over an already-batched [B,T,D] input compiled fine and crashed at runtime."""
+    pytest.importorskip("equinox")
+    code = JAX_OK.replace("return x @ self.w", "return jax.vmap(lambda r: r @ jnp.ones((9, 9)))(x)")
+    rc, out = _run_jax(tmp_path, controller, code, {"x": "[2, 3, 4]"})
+    assert rc != 0 and "execution error" in out
+
+
+def test_jax_harness_required_init_arg_is_actionable(tmp_path, controller):
+    pytest.importorskip("equinox")
+    code = JAX_OK.replace("def __init__(self, d=4, key=None)", "def __init__(self, d, key=None)")
+    rc, out = _run_jax(tmp_path, controller, code, {"x": "[2, 4]"})
+    assert rc != 0 and "Give every __init__ parameter a default" in out

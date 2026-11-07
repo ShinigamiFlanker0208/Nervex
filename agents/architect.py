@@ -15,7 +15,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 import json
 import re
 from agents.state import SoulGraphState
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
+from agents.llm_factory import build_llm
 
 
 
@@ -29,14 +29,7 @@ class ArchitectAgent:
         # TODO: Initialize prompt templates and LLM execution chain.
         """
 
-        self.llm =ChatNVIDIA(
-          model="nvidia/nemotron-3-ultra-550b-a55b",
-          api_key=os.environ.get("NVIDIA_API_KEY"),  # was the literal string "$NVIDIA_API_KEY" (never expanded -> 401)
-          temperature=0.1,
-          top_p=0.95,
-          max_tokens=16384,
-          chat_template_kwargs={"enable_thinking":True},
-        )
+        self.llm = build_llm("architect")
         self.prompt = ChatPromptTemplate.from_messages([
             ("system",
              "You are an AI deep learning architect. You do NOT write math implementation. You ONLY write structural class skeletons with exact tensor dimensionality tracking."),

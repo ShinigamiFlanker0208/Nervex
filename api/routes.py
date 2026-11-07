@@ -227,11 +227,14 @@ async def run_ablation_experiment(request: AblationStudyRequest) -> AblationStud
 async def transpile_model_framework(request: TranspilationRequest) -> TranspilationResponse:
     try:
         out = await deps.get_transpiler().transpile_model(
-            request.source_code, request.source_framework, request.target_framework, request.architecture_skeleton
+            request.source_code, request.source_framework, request.target_framework, request.architecture_skeleton,
+            request.expected_inputs,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
     return TranspilationResponse(
         source_framework=out["source_framework"], target_framework=out["target_framework"],
         transpiled_code=out["transpiled_code"], syntax_valid=out["syntax_valid"], notes=out["notes"],
+        runtime_verified=out.get("runtime_verified"), runtime_logs=out.get("runtime_logs", ""),
+        output_shape=out.get("output_shape"),
     )

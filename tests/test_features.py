@@ -70,7 +70,7 @@ def test_transpile_repairs_after_static_failure():
 
 
 def test_transpile_reports_failure_after_all_bad_attempts_and_missing_block():
-    llm = LLM("```python\nimport os\n```", "no code here", "```python\nimport os\n```")
+    llm = LLM("```python\nimport os\n```", "no code here", "```python\nimport os\n```", "```python\nimport os\n```")
     out = run(FrameworkTranspiler(llm=llm, critic=Critic()).transpile_model("c", "PyTorch", "JAX", ""))
     assert not out["syntax_valid"] and "STATIC ANALYSIS FAILED" in out["notes"]
 
@@ -124,3 +124,35 @@ def test_explainer_stops_on_endless_tool_calls():
     agent._tools["search_paper_text"] = lambda **k: ["p"]
     out = run(agent.explain("why?", (1, 1), "x=1", []))
     assert "budget exhausted" in out["answer_markdown"]
+
+
+# ---------------- transpile: runtime verification + repair ----------------
+def test_transpile_runtime_failure_is_fed_back_and_repaired():
+    llm = LLM("```python\nbad_runtime = 1\n```", "```python\nok = 1\n```\n### Notes\n- fixed")
+    seen = []
+
+    async def verifier(code, fw, inputs):
+        seen.append((code, fw))
+        return ("ok" in code), "Traceback: vmap exploded", {"output": [2, 3]}
+    out = run(FrameworkTranspiler(llm=llm, critic=Critic(), verifier=verifier)
+              .transpile_model("c", "PyTorch", "JAX", "", {"x": "[2, 3]"}))
+    assert out["runtime_verified"] is True and out["output_shape"] == [2, 3] and llm.calls == 2
+    assert [fw for _, fw in seen] == ["JAX", "JAX"]
+
+
+def test_transpile_reports_runtime_failure_honestly():
+    llm = LLM(*["```python\nx = 1\n```"] * 4)
+
+    async def verifier(code, fw, inputs):
+        return False, "boom", {}
+    out = run(FrameworkTranspiler(llm=llm, critic=Critic(), verifier=verifier)
+              .transpile_model("c", "PyTorch", "JAX", "", {"x": "[2, 3]"}))
+    assert out["syntax_valid"] is True and out["runtime_verified"] is False and "RUNTIME FAILED" in out["notes"]
+
+
+def test_transpile_without_inputs_says_not_executed():
+    async def verifier(*a):
+        raise AssertionError("must not run")
+    out = run(FrameworkTranspiler(llm=LLM("```python\nx = 1\n```"), critic=Critic(), verifier=verifier)
+              .transpile_model("c", "PyTorch", "JAX", ""))
+    assert out["runtime_verified"] is None and "NOT EXECUTED" in out["notes"]

@@ -120,10 +120,16 @@ async def root_health_check() -> Dict[str, Any]:
     probes = await _probe_subsystems()
     required = ("neo4j", "docker", "sandbox_image")
     ok = all(probes.get(k) for k in required)
+    try:
+        from agents.llm_factory import describe
+        llm = describe()                       # provider/model/has_key, never the key itself
+    except ValueError as exc:
+        llm = {"error": str(exc)}
     return {
         "status": "online" if ok else "degraded",
         "system": "SoulGraph Autonomous Engine",
         "subsystems": probes,
+        "llm": llm,
         "message": "all required subsystems reachable" if ok else
                    "degraded: " + ", ".join(k for k in required if not probes.get(k)),
     }

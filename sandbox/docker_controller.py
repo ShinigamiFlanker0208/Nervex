@@ -250,59 +250,165 @@ if __name__ == "__main__":
             # Bad input spec / no forward call: report it like any failure so the Critic sees the reason.
             return False, {"logs": f"INVALID SANDBOX INPUT: {exc}", "tensor_traces": {}}
 
-        logs=""
+        success, logs = self._run_container(
+            {"main_run.py": harness, "telemetry_tracker.py": get_telemetry_tracker_code()}, gpu=True)
         traces: Dict[str, Any] = {}
-        success=False
-        temp_dir=tempfile.mkdtemp()
+        # Step 6: traces travel via stdout (tmpfs is gone once the container stops)
+        for line in logs.splitlines():
+            if line.startswith("NERVEX_TRACES="):
+                try:
+                    traces = json.loads(line[len("NERVEX_TRACES="):])
+                except ValueError:
+                    pass
+        return success, {"logs": logs, "tensor_traces": traces}
 
+    def _run_container(self, files: Dict[str, str], gpu: bool = True) -> Tuple[bool, str]:
+        """Stage `files` in a temp dir and run `main_run.py` in the locked-down container.
+        Returns (success, logs). Shared by the PyTorch and JAX harnesses so BOTH get the same limits:
+        no network, no caps, uid 1000, read-only /workspace, tmpfs /tmp, memory cap, kill on timeout."""
+        logs = ""
+        success = False
+        temp_dir = tempfile.mkdtemp()
         try:
-            # Step 2: stage both scripts. The container user (1000) must be able to read them.
+            # The container user (1000) must be able to read the staged scripts.
             os.chmod(temp_dir, 0o755)
-            (Path(temp_dir)/"main_run.py").write_text(harness)
-            (Path(temp_dir)/"telemetry_tracker.py").write_text(get_telemetry_tracker_code())
+            for name, text in files.items():
+                (Path(temp_dir) / name).write_text(text)
 
-            container=self.client.containers.run(
+            container = self.client.containers.run(
                 settings.DOCKER_SANDBOX_IMAGE,
                 "python /workspace/main_run.py",
                 volumes={temp_dir: {"bind": "/workspace", "mode": "ro"}},
                 tmpfs={"/tmp": "size=64m,mode=1777"},
-                environment={"HOME": "/tmp", "PYTHONDONTWRITEBYTECODE": "1"},
+                environment={"HOME": "/tmp", "PYTHONDONTWRITEBYTECODE": "1",
+                             **({} if gpu else {"JAX_PLATFORMS": "cpu", "CUDA_VISIBLE_DEVICES": ""})},
                 user="1000:1000",
                 network_mode="none",
                 cap_drop=["ALL"],
                 mem_limit=f"{settings.CONTAINER_MEMORY_LIMIT_MB}m",
                 detach=True,
                 device_requests=[docker.types.DeviceRequest(count=-1, capabilities=[["gpu"]])]
-                if self.has_gpu_runtime else None)
+                if (gpu and self.has_gpu_runtime) else None)
 
             try:
-                result=container.wait(timeout=settings.CONTAINER_TIMEOUT_SECONDS)
-                status_code=result.get("StatusCode",1)
+                result = container.wait(timeout=settings.CONTAINER_TIMEOUT_SECONDS)
+                status_code = result.get("StatusCode", 1)
             except (ReadTimeout, RequestsConnectionError):
                 # wait() timing out does NOT stop the container; we must kill it ourselves.
                 container.kill()
-                status_code=124
-                logs="TIMEOUT: container exceeded "+str(settings.CONTAINER_TIMEOUT_SECONDS)+"s and was killed\n"
+                status_code = 124
+                logs = "TIMEOUT: container exceeded " + str(settings.CONTAINER_TIMEOUT_SECONDS) + "s and was killed\n"
 
-            logs+=container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
-
-            # Step 6: traces travel via stdout (tmpfs is gone once the container stops)
-            for line in logs.splitlines():
-                if line.startswith("NERVEX_TRACES="):
-                    traces=json.loads(line[len("NERVEX_TRACES="):])
-
-            success= (status_code==0) and ("execution error" not in logs.lower())
+            logs += container.logs(stdout=True, stderr=True).decode("utf-8", errors="replace")
+            success = (status_code == 0) and ("execution error" not in logs.lower())
 
         except DockerException as exc:
-            success=False
-            logs+=f"\nDOCKER ERROR: {exc}"
+            success = False
+            logs += f"\nDOCKER ERROR: {exc}"
             print(f"Container failed: {exc}")
         finally:
             if "container" in locals():
                 container.remove(force=True)
             shutil.rmtree(temp_dir, ignore_errors=True)
+        return success, logs
 
-        return success,{"logs":logs, "tensor_traces":traces}
+    # ------------------------------------------------------------------ JAX / Equinox smoke run
+    def _generate_jax_harness(self, code_string: str, expected_inputs: Dict[str, str]) -> str:
+        """Pure str -> str. Builds a script that instantiates the LAST equinox.Module defined in the code
+        with no arguments, feeds it BATCHED dummy inputs (same shapes the PyTorch model saw) and checks the
+        output exists and is finite. Why batched: a transpile must keep the PyTorch semantics; the classic
+        failure (jax.vmap over an already-batched input) only shows up when you really call it."""
+        entries = []
+        for name, spec in (expected_inputs or {}).items():
+            if not isinstance(name, str) or not name.isidentifier():
+                raise ValueError(f"invalid input name: {name!r}")
+            shape = parse_shape(spec)
+            kind = input_dtype(name, spec)
+            dims = ", ".join(str(d) for d in shape) + ("," if len(shape) == 1 else "")
+            if kind == "bool":
+                expr = f"jnp.zeros(({dims}), dtype=jnp.bool_)"
+            elif kind == "int":
+                expr = f"jax.random.randint(_key, ({dims}), 0, 8)"
+            else:
+                expr = f"jax.random.normal(_key, ({dims}))"
+            entries.append(f"{name!r}: {expr}")
+        inputs_dict = "{" + ", ".join(entries) + "}"
+        return f"""import json
+import sys
+import traceback
+import inspect
+
+#------------Generated Model Class-------------
+{code_string}
+
+
+#--------execution test-----------------
+def run_test():
+    try:
+        import jax
+        import jax.numpy as jnp
+        import equinox as eqx
+        _key = jax.random.PRNGKey(0)
+        _inputs = {inputs_dict}
+        candidates = [o for o in globals().values()
+                      if isinstance(o, type) and issubclass(o, eqx.Module)
+                      and o is not eqx.Module and o.__module__ == "__main__"]
+        if not candidates:
+            raise RuntimeError("No equinox.Module class found in generated code!")
+        model_cls = candidates[-1]
+        _sig = inspect.signature(model_cls.__init__).parameters
+        _required = [n for i, (n, p) in enumerate(_sig.items())
+                     if i > 0 and n != "key" and p.default is p.empty and p.kind in (p.POSITIONAL_OR_KEYWORD, p.KEYWORD_ONLY)]
+        if _required:
+            raise TypeError(model_cls.__name__ + ".__init__ requires " + str(_required) + " but the harness builds the model with NO arguments (only `key` is supplied). Give every __init__ parameter a default value (use the paper's hyperparameters).")
+        model = model_cls(key=_key) if "key" in _sig else model_cls()
+        _params = inspect.signature(model.__call__).parameters
+        _data = {{k: v for k, v in _inputs.items()}}
+        if "key" in _params and "key" not in _data:
+            _data["key"] = jax.random.PRNGKey(1)
+        if _inputs and all(n in _params for n in _inputs):
+            output = model(**_data)
+        else:
+            output = model(*_inputs.values(), **({{"key": _data["key"]}} if "key" in _data and "key" in _params else {{}}))
+        def _shape(o):
+            if hasattr(o, "shape"):
+                return list(o.shape)
+            if isinstance(o, (tuple, list)):
+                return [_shape(i) for i in o]
+            if isinstance(o, dict):
+                return {{str(k): _shape(v) for k, v in o.items()}}
+            return type(o).__name__
+        leaves = [l for l in jax.tree_util.tree_leaves(output) if hasattr(l, "dtype")]
+        if not leaves:
+            raise RuntimeError("model returned no arrays")
+        if not all(bool(jnp.all(jnp.isfinite(l))) for l in leaves if jnp.issubdtype(l.dtype, jnp.floating)):
+            raise FloatingPointError("output contains NaN/Inf")
+        print("Executing forward pass success")
+        print("NERVEX_JAX=" + json.dumps({{"input": {{k: _shape(v) for k, v in _inputs.items()}}, "output": _shape(output)}}))
+    except Exception:
+        print("execution error")
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == "__main__":
+    run_test()
+"""
+
+    def run_jax_smoke(self, code_string: str, expected_inputs: Dict[str, str]) -> Tuple[bool, Dict[str, Any]]:
+        """Run transpiled JAX/Equinox code in the same locked-down container (CPU: JAX needs no VRAM here)."""
+        try:
+            harness = self._generate_jax_harness(code_string, expected_inputs)
+        except ValueError as exc:
+            return False, {"logs": f"INVALID SANDBOX INPUT: {exc}", "shapes": {}}
+        success, logs = self._run_container({"main_run.py": harness}, gpu=False)
+        shapes: Dict[str, Any] = {}
+        for line in logs.splitlines():
+            if line.startswith("NERVEX_JAX="):
+                try:
+                    shapes = json.loads(line[len("NERVEX_JAX="):])
+                except ValueError:
+                    pass
+        return success, {"logs": logs, "shapes": shapes}
 
 
 # =====================================================================
