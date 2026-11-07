@@ -28,7 +28,7 @@ def test_google_provider(monkeypatch):
     monkeypatch.setattr(settings, "LLM_PROVIDER", "google")
     monkeypatch.setattr(settings, "GOOGLE_API_KEY", "g-key")
     llm = llm_factory.build_llm("extractor")
-    assert type(llm).__name__ == "ChatGoogleGenerativeAI" and llm.model.endswith("gemini-2.5-flash")
+    assert isinstance(llm, __import__("langchain_google_genai").ChatGoogleGenerativeAI) and llm.model.endswith("gemini-3.5-flash")
 
 
 def test_google_key_from_gemini_env(monkeypatch):
@@ -77,3 +77,9 @@ def test_describe_never_leaks_key(monkeypatch):
 def test_other_providers_errors_are_classified(msg, kind):
     from agents.llm_retry import classify
     assert classify(Exception(msg))[1] == kind
+
+
+def test_gemini_list_content_is_flattened_to_text():
+    from agents.llm_factory import _flatten
+    assert _flatten([{"type": "thinking", "thinking": "x"}, {"type": "text", "text": "```python\na=1\n```"}]) == "```python\na=1\n```"
+    assert _flatten("plain") == "plain" and _flatten([]) == ""

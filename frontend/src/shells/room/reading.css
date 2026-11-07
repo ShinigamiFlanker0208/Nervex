@@ -36,3 +36,14 @@
 .mg-grid.tree-closed { grid-template-columns:min(460px,34vw) minmax(0,1fr) 320px; }
 .mg-grid.tree-closed .rr-mini { position:sticky; top:16px; margin-top:4px; } .mg-grid.tree-closed .rr-mini .mg-plate-canvas { height:min(70vh,640px); }
 @media (max-width:1150px) { .mg-grid.tree-closed { grid-template-columns:1fr; } .mg-grid.tree-closed .rr-mini .mg-plate-canvas { height:360px; } }
+.pvs { position:relative; } .pvs-btn { display:flex; align-items:center; gap:7px; background:none; border:1px solid var(--line); border-radius:99px; padding:3px 11px; font:.74rem "JetBrains Mono"; color:var(--ink); cursor:pointer; }
+.pvs-btn:hover { border-color:var(--ink); } .pvs-btn small { color:var(--faint); } .pvs-btn b { font-size:.7rem; color:var(--mut); } .pvs-btn:disabled { opacity:.5; cursor:wait; }
+.pvs-dot { width:7px; height:7px; border-radius:50%; background:var(--good); }
+.pvs-menu { position:absolute; z-index:40; top:calc(100% + 8px); left:0; width:340px; background:#fbf6ec; border:1.5px solid var(--ink); box-shadow:6px 6px 0 var(--pencil); padding:12px; }
+.pvs-h { margin:0 0 8px; font:italic 1.15rem "Instrument Serif"; } .pvs-h span { font:.62rem "JetBrains Mono"; font-style:normal; color:var(--faint); margin-left:6px; }
+.pvs-item { display:grid; grid-template-columns:1fr auto; width:100%; text-align:left; background:none; border:0; border-top:1px solid var(--line); padding:8px 4px; cursor:pointer; font:inherit; color:var(--ink); }
+.pvs-item span { font-size:.9rem; } .pvs-item small { grid-column:1; font:.64rem "JetBrains Mono"; color:var(--faint); } .pvs-item em { grid-row:1 / 3; grid-column:2; align-self:center; font:.6rem "JetBrains Mono"; font-style:normal; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); }
+.pvs-item em.k { color:var(--good); } .pvs-item.on { background:rgba(47,107,67,.08); } .pvs-item.on em { color:var(--ink); } .pvs-item:hover:not(.on) { background:rgba(179,38,30,.06); }
+.pvs-form { display:flex; flex-direction:column; gap:6px; margin-top:8px; padding-top:8px; border-top:1px dashed var(--line); } .pvs-form input { border:0; border-bottom:1.3px solid var(--ink); background:rgba(255,255,255,.6); padding:6px 4px; font:.78rem "JetBrains Mono"; outline:none; }
+.pvs-form button { background:var(--ink); color:var(--paper); border:0; padding:8px; cursor:pointer; font:600 .78rem Outfit; } .pvs-form button:disabled { opacity:.4; } .pvs-form p { margin:0; font-size:.7rem; color:var(--faint); }
+.pvs-msg { margin:8px 0 0; font:.74rem "JetBrains Mono"; } .pvs-msg.ok { color:var(--good); } .pvs-msg.bad { color:var(--pencil); }

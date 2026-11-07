@@ -7,6 +7,7 @@ import { ChatPane, CodeView, IngestPanel, OfflineNotice, ToolsPane, fmtSecs } fr
 import { Constellation } from "../marginalia/Constellation";
 import "../marginalia/marginalia.css";
 import "./reading.css";
+import { ProviderSwitch } from "../../ui/ProviderSwitch";
 import "./views.css";
 import { NotebookView } from "./views/NotebookView";
 import { PaperView } from "./views/PaperView";
@@ -98,7 +99,7 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
           {ws.papers.length > 1 && <select value={ws.paperId ?? ""} onChange={e => ws.setPaperId(e.target.value)}>{ws.papers.map(p => <option key={p.paper_id} value={p.paper_id}>{p.title}</option>)}</select>}
           <button className="mg-link" onClick={() => setAdding(a => !a)}>add a paper</button>
           <button className="mg-link" onClick={onTour}>how it works</button>
-          {ws.health?.llm.provider && <span className="mg-pill">{ws.health.llm.provider}</span>}
+          <ProviderSwitch busy={busy} />
           {faces}
         </div>
       </header>

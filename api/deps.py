@@ -73,3 +73,14 @@ def get_transpiler() -> Any:
 def get_explainer() -> Any:
     from explainer.chat_agent import ExplainerChatAgent
     return ExplainerChatAgent()
+
+
+def reset_llm_clients() -> None:
+    """Drop every cached object that holds an LLM client, so the next request builds them with the provider
+    that is now in settings. (The orchestrator is built per request, so it picks the change up by itself.)"""
+    for fn in (get_extractor, get_transpiler, get_explainer):
+        fn.cache_clear()
+    try:
+        from sandbox import docker_controller  # noqa: F401  (sandbox holds no LLM; nothing to reset)
+    except Exception:
+        pass

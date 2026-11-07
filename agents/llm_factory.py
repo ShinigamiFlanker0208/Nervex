@@ -24,7 +24,7 @@ PROVIDERS = ("nvidia", "google", "openai", "openai_compatible", "ollama")
 
 DEFAULT_MODELS = {
     "nvidia": "nvidia/nemotron-3-ultra-550b-a55b",
-    "google": "gemini-2.5-flash",
+    "google": "gemini-3.5-flash",       # 2.5-flash was retired for new keys (404 on Nov 8 2026)
     "openai": "gpt-4o-mini",
     "openai_compatible": "local-model",
     "ollama": "qwen2.5-coder:7b",
@@ -46,6 +46,7 @@ ROLES: Dict[str, Dict[str, Any]] = {
     "critic":     {"temperature": 0.1, "max_tokens": 16384, "thinking": True, "top_p": 0.95},
     "chat":       {"temperature": 0.2, "max_tokens": 4096, "thinking": False},
     "transpiler": {"temperature": 0.1, "max_tokens": 8192, "thinking": False},
+    "probe":      {"temperature": 0.0, "max_tokens": 16, "thinking": False},     # key check when switching provider
 }
 
 
@@ -93,8 +94,7 @@ def build_llm(role: str) -> Any:
         return ChatNVIDIA(**kw)
 
     if provider == "google":
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model=model, google_api_key=key, temperature=prof["temperature"],
+        return _gemini_class()(model=model, google_api_key=key, temperature=prof["temperature"],
                                       max_output_tokens=prof["max_tokens"], max_retries=1)
 
     # openai / openai_compatible / ollama all speak the OpenAI chat protocol
@@ -107,6 +107,34 @@ def build_llm(role: str) -> Any:
         raise RuntimeError("LLM_PROVIDER=openai_compatible needs LLM_BASE_URL (e.g. http://localhost:8001/v1).")
     return ChatOpenAI(model=model, api_key=key or "not-needed", base_url=base,
                       temperature=prof["temperature"], max_tokens=prof["max_tokens"], max_retries=1)
+
+
+def _flatten(content: Any) -> Any:
+    """Gemini 3 returns content as a list of parts ([{"type": "text", "text": ...}, {"type": "thinking", ...}]).
+    Every agent here expects a string (regex over ```python blocks), so keep only the text parts."""
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) and p.get("type", "text") == "text" else (p if isinstance(p, str) else "") for p in content)
+    return content
+
+
+_GEMINI = None
+def _gemini_class():
+    """ChatGoogleGenerativeAI whose replies always carry string content. Done at the generation level (not by
+    wrapping the model in a Runnable) so bind_tools / with_structured_output keep working."""
+    global _GEMINI
+    if _GEMINI is None:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        class NervexGemini(ChatGoogleGenerativeAI):
+            def _fix(self, result):
+                for g in result.generations:
+                    g.message.content = _flatten(g.message.content)
+                    if hasattr(g, "text"): g.text = g.message.content if isinstance(g.message.content, str) else g.text
+                return result
+            def _generate(self, *a, **k): return self._fix(super()._generate(*a, **k))
+            async def _agenerate(self, *a, **k): return self._fix(await super()._agenerate(*a, **k))
+        _GEMINI = NervexGemini
+    return _GEMINI
 
 
 def describe() -> Dict[str, Any]:

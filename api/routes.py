@@ -403,3 +403,46 @@ async def run_status(run_id: str, since: int = 0) -> Dict[str, Any]:
     if run is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Unknown run_id.")
     return run
+
+
+# =====================================================================
+# Runtime LLM provider switch (no code edits, no restart)
+# =====================================================================
+
+@router.get("/system/providers", summary="Providers, their default models, which one is active, which have a key")
+async def list_providers() -> Dict[str, Any]:
+    from agents import llm_factory as F
+    active = F.resolve_provider()
+    return {"active": active, "model": settings.LLM_MODEL or F.DEFAULT_MODELS[active],
+            "providers": [{"id": p, "default_model": F.DEFAULT_MODELS[p],
+                           "has_key": bool(F.resolve_api_key(p)) or p in ("ollama", "openai_compatible")} for p in F.PROVIDERS]}
+
+
+@router.post("/system/provider", summary="Test a provider with one tiny call; switch to it only if it answers")
+async def switch_provider(body: Dict[str, Any]) -> Dict[str, Any]:
+    import asyncio
+    from agents import llm_factory as F
+    from agents.llm_retry import classify
+    p = str(body.get("provider", "")).strip().lower()
+    if p not in F.PROVIDERS:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Unknown provider {p!r}.")
+    if deps.generation_lock.locked():
+        raise HTTPException(status.HTTP_409_CONFLICT, "A run is in progress; switch after it finishes.")
+    old = {k: getattr(settings, k) for k in ("LLM_PROVIDER", "LLM_MODEL", "LLM_API_KEY", "LLM_BASE_URL")}
+    settings.LLM_PROVIDER = p
+    settings.LLM_MODEL = (body.get("model") or None)
+    if body.get("api_key"): settings.LLM_API_KEY = str(body["api_key"])            # memory only, never written to disk
+    elif old["LLM_PROVIDER"] != p: settings.LLM_API_KEY = None                    # an override key belongs to the old provider
+    if body.get("base_url") is not None: settings.LLM_BASE_URL = body.get("base_url") or None
+    t0 = __import__("time").time()
+    try:
+        llm = F.build_llm("probe")
+        reply = await asyncio.wait_for(llm.ainvoke("Reply with exactly: ok"), timeout=45)
+    except Exception as exc:
+        for k, v in old.items(): setattr(settings, k, v)                         # a failed probe changes nothing
+        _, kind = classify(exc)
+        return {"ok": False, "provider": old["LLM_PROVIDER"], "error": kind or type(exc).__name__,
+                "detail": str(exc)[:300]}
+    deps.reset_llm_clients()
+    return {"ok": True, "provider": p, "model": settings.LLM_MODEL or F.DEFAULT_MODELS[p],
+            "latency_s": round(__import__("time").time() - t0, 2), "reply": str(getattr(reply, "content", ""))[:40]}

@@ -74,7 +74,7 @@ All agents get their model from one place (`agents/llm_factory.py`), driven by `
 | `LLM_PROVIDER` | Needs | Default model |
 |---|---|---|
 | `nvidia` (default) | `NVIDIA_API_KEY` | nemotron-3-ultra-550b-a55b (thinking on) |
-| `google` | `GOOGLE_API_KEY` | gemini-2.5-flash |
+| `google` | `GOOGLE_API_KEY` | gemini-3.5-flash |
 | `openai` | `OPENAI_API_KEY` | gpt-4o-mini |
 | `openai_compatible` | `LLM_BASE_URL` (+ key if the server wants one) | `LLM_MODEL` |
 | `ollama` | a running Ollama | qwen2.5-coder:7b |

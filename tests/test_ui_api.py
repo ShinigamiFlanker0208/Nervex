@@ -146,3 +146,36 @@ def test_ablations_are_saved_and_filtered():
     from api.runs import save_ablation, list_ablations
     save_ablation("p", "mha", {"mutation_prompt": "drop w_o"}); save_ablation("p", "ffn", {"mutation_prompt": "x"})
     assert [a["mutation_prompt"] for a in list_ablations("p", "mha")] == ["drop w_o"] and len(list_ablations("p")) == 2
+
+
+# ---------------- runtime provider switch ----------------
+class _Probe:
+    def __init__(self, fail=None): self.fail = fail
+    async def ainvoke(self, m):
+        if self.fail: raise Exception(self.fail)
+        return SimpleNamespace(content="ok")
+
+
+def test_switch_succeeds_only_after_probe_answers(client, monkeypatch):
+    from agents import llm_factory
+    from config import settings
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "nvidia"); monkeypatch.setattr(settings, "LLM_API_KEY", None)
+    monkeypatch.setattr(llm_factory, "build_llm", lambda role: _Probe())
+    cleared = []; monkeypatch.setattr(deps, "reset_llm_clients", lambda: cleared.append(1))
+    r = client.post("/api/v1/system/provider", json={"provider": "ollama"}).json()
+    assert r["ok"] and r["provider"] == "ollama" and settings.LLM_PROVIDER == "ollama" and cleared
+
+
+def test_failed_probe_rolls_back_and_keeps_old_provider(client, monkeypatch):
+    from agents import llm_factory
+    from config import settings
+    monkeypatch.setattr(settings, "LLM_PROVIDER", "nvidia"); monkeypatch.setattr(settings, "LLM_API_KEY", None)
+    monkeypatch.setattr(llm_factory, "build_llm", lambda role: _Probe("400 API key not valid"))
+    r = client.post("/api/v1/system/provider", json={"provider": "google", "api_key": "bad"}).json()
+    assert r["ok"] is False and r["error"] == "upstream_auth" and settings.LLM_PROVIDER == "nvidia" and settings.LLM_API_KEY is None
+
+
+def test_unknown_provider_and_providers_list(client):
+    assert client.post("/api/v1/system/provider", json={"provider": "bard"}).status_code == 422
+    r = client.get("/api/v1/system/providers").json()
+    assert {p["id"] for p in r["providers"]} >= {"nvidia", "google", "ollama"} and "api_key" not in str(r)
