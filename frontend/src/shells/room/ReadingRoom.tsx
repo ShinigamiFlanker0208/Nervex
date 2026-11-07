@@ -7,6 +7,10 @@ import { ChatPane, CodeView, IngestPanel, OfflineNotice, ToolsPane, fmtSecs } fr
 import { Constellation } from "../marginalia/Constellation";
 import "../marginalia/marginalia.css";
 import "./reading.css";
+import "./views.css";
+import { NotebookView } from "./views/NotebookView";
+import { PaperView } from "./views/PaperView";
+import { TableView } from "./views/TableView";
 
 const ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII"];
 const RAIL = [["researcher", "reads"], ["architect", "drafts the contract"], ["coder", "writes"], ["sandbox_executor", "runs it"], ["critic", "objects"]] as const;
@@ -64,6 +68,11 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
   const [range, setRange] = useState<[number, number] | null>(null);
   const [adding, setAdding] = useState(false);
   const [openDiff, setOpenDiff] = useState<number | null>(null);
+  const [view, setView] = useState<"paper" | "table" | "notebook">("paper");
+  // chapters tree: closed = the graph takes the whole column; remembered per browser
+  const [tree, setTree] = useState<boolean>(() => { try { return localStorage.getItem("nervex.tree") !== "0"; } catch { return true; } });
+  const toggleTree = () => setTree(t => { try { localStorage.setItem("nervex.tree", t ? "0" : "1"); } catch { /* private mode */ } return !t; });
+  useEffect(() => { if (ws.phase === "queued" || ws.phase === "running") setView("notebook"); else if (ws.phase === "done") setView("table"); }, [ws.phase]);
   const [copied, setCopied] = useState(false);
   const codeBox = useRef<HTMLDivElement>(null);
   const D = useMemo(() => drafts(ws), [ws.events]);                                     // eslint-disable-line react-hooks/exhaustive-deps
@@ -72,7 +81,8 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
   const busy = ws.phase === "running" || ws.phase === "queued";
   const eqs = useMemo(() => [...ws.events].reverse().find(e => e.formulas_tex)?.formulas_tex ?? [], [ws.events]);
   const tagLine = (id: string) => ws.tags.find(t => t.nodeId === id)?.line;
-  const goLine = (n: number) => { const el = codeBox.current?.querySelectorAll(".nx-line")[n - 1] as HTMLElement | undefined; el?.scrollIntoView({ behavior: "smooth", block: "center" }); setRange([n, n + 1]); };
+  const goLine = (n: number) => { setView("notebook"); setTimeout(() => goLine2(n), 80); };
+  const goLine2 = (n: number) => { const el = codeBox.current?.querySelectorAll(".nx-line")[n - 1] as HTMLElement | undefined; el?.scrollIntoView({ behavior: "smooth", block: "center" }); setRange([n, n + 1]); };
   const fname = `${(ws.component?.id ?? "module").replace(/[^a-z0-9_]/gi, "_")}_${ws.framework.toLowerCase()}.py`;
   const download = () => { const u = URL.createObjectURL(new Blob([ws.code], { type: "text/x-python" })); const a = document.createElement("a"); a.href = u; a.download = fname; a.click(); URL.revokeObjectURL(u); };
   const copy = async () => { try { await navigator.clipboard.writeText(ws.code); setCopied(true); setTimeout(() => setCopied(false), 1400); } catch { /* clipboard blocked */ } };
@@ -82,7 +92,7 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
     <div className="mg rr" data-shell="reading">
       <header className="mg-mast">
         <div className="mg-brand"><span className="mg-smallcaps">Nervex</span><i>a reading of</i></div>
-        <h1>{paper?.title ?? (ws.offline ? "The API is asleep" : "An empty shelf")}</h1>
+        <h1>{paper?.title ?? (ws.offline ? "The API is asleep" : ws.papersLoaded ? "An empty shelf" : "Opening the shelf…")}</h1>
         <div className="mg-meta">
           {paper && <span>{paper.nodes} entities · {paper.edges} relations · {ws.shelf.length} run{ws.shelf.length === 1 ? "" : "s"} on the shelf</span>}
           {ws.papers.length > 1 && <select value={ws.paperId ?? ""} onChange={e => ws.setPaperId(e.target.value)}>{ws.papers.map(p => <option key={p.paper_id} value={p.paper_id}>{p.title}</option>)}</select>}
@@ -93,12 +103,14 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
         </div>
       </header>
       <OfflineNotice ws={ws} />
-      {(adding || (!ws.papers.length && !ws.offline)) && <section className="mg-sheet"><IngestPanel ws={ws} /></section>}
+      {(adding || (ws.papersLoaded && !ws.papers.length && !ws.offline)) && <section className="mg-sheet"><IngestPanel ws={ws} /></section>}
 
-      <div className="mg-grid">
+      <div className={`mg-grid${tree ? "" : " tree-closed"}`}>
         <aside className="mg-contents">
-          <h2>Chapters</h2>
-          <div className="mg-fw">{["PyTorch", "JAX"].map(f => <button key={f} className={ws.framework === f ? "on" : ""} onClick={() => ws.setFramework(f)}>{f}</button>)}</div>
+          <button className="rr-treebtn" onClick={toggleTree} aria-expanded={tree}>
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden><path d="M2 2v10M2 4h4M2 8h4M2 12h4M8 4h4M8 8h4M8 12h4" stroke="currentColor" strokeWidth="1.3" fill="none" /></svg>
+            <span>Chapters</span><em>{ws.components.length}</em><i>{tree ? "hide" : "show"}</i></button>
+          {tree && <><div className="mg-fw">{["PyTorch", "JAX"].map(f => <button key={f} className={ws.framework === f ? "on" : ""} onClick={() => ws.setFramework(f)}>{f}</button>)}</div>
           <ol className="mg-toc">{ws.components.map((c, i) => {
             const dup = ws.components.filter(x => (x.name ?? x.id) === (c.name ?? c.id)).length > 1;
             const done = ws.shelf.find(r => r.component === c.id && r.status === "SUCCESS");
@@ -106,38 +118,25 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
               <button disabled={busy} onClick={() => ws.startRun(c)} title={c.description ?? ""}><span className="n">{i + 1}.</span>
                 <span className="t">{c.name ?? c.id}{dup && <small className="rr-id"> {c.id}</small>}{done && <em className="rr-tick" title="verified before">✓</em>}</span><span className="lead" /><span className="p">{c.formulas ? `${c.formulas}ƒ` : c.degree}</span></button></li>; })}
           </ol>
-          {!ws.components.length && <p className="mg-dim">{ws.paperId ? "No chapters found." : "Add a paper to begin."}</p>}
-          {ws.phase !== "idle" && <div className="mg-fig rr-mini"><Constellation ws={ws} /><figcaption>Red: what this code is built from.</figcaption></div>}
+          {!ws.components.length && <p className="mg-dim">{ws.paperId ? "No chapters found." : "Add a paper to begin."}</p>}</>}
+          <div className="mg-fig rr-mini"><Constellation ws={ws} /><figcaption>{ws.phase === "idle" ? "The paper\u2019s best-connected ideas. Hover a chapter to find it." : "Red: what this code is built from."}</figcaption></div>
         </aside>
 
         <main className="mg-ms">
-          {ws.phase === "idle" ? <>
-            <section className="rr-front">
-              <div className="rr-front-plate"><Constellation ws={ws} /></div>
-              <div className="rr-front-cap">
-                <p className="mg-kicker">{focus ? focus.type : "frontispiece"}</p>
-                <h2 className="mg-big">{focus ? focus.name : <>The paper, as a <em>graph</em>.</>}</h2>
-                <p className="mg-lede">{focus?.description ?? `${paper ? `${Math.min(paper.nodes, 140)} of ${paper.nodes} entities, the best connected.` : ""} Hover a chapter on the left to find it here. Pick one to have it built, run and verified.`}</p>
-              </div>
-            </section>
-            <section className="rr-shelf">
-              <h3>The shelf <span>every run is kept, passed or not</span></h3>
-              {!ws.shelf.length && <p className="mg-dim">Empty. Your first run will be filed here.</p>}
-              <div className="rr-cards">{ws.shelf.slice(0, 12).map(r => (
-                <button key={r.run_id} className={`rr-card ${r.status === "SUCCESS" ? "ok" : "bad"}`} onClick={() => ws.openSaved(r.run_id)}>
-                  <span className="rr-card-st">{r.status === "SUCCESS" ? "verified" : "not verified"}</span>
-                  <b>{ws.components.find(c => c.id === r.component)?.name ?? r.component}</b>
-                  <i>{r.framework} · {r.attempts} draft{r.attempts === 1 ? "" : "s"} · {fmtSecs(r.duration)}{r.layers ? ` · ${r.layers} layers` : ""}</i>
-                  <small>{r.created_at ? new Date(r.created_at * 1000).toLocaleString("en-GB", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) : ""}</small>
-                </button>))}</div>
-            </section>
-          </> : <>
-            <div className="mg-run">
-              <h2 className="mg-big sm">{ws.component?.name}<small> · {ws.framework}</small></h2>
-              <span className={`mg-stamp ${ws.phase}`}>{ws.phase === "done" ? "verified" : ws.phase === "failed" ? "not verified" : ws.phase === "queued" ? "waiting" : "drafting"}</span>
-            </div>
-            <Rail ws={ws} />
-            {ws.runErr && <div className="nx-err">{ws.runErr}</div>}
+          {ws.phase !== "idle" && <div className="mg-run">
+            <h2 className="mg-big sm">{ws.component?.name}<small> · {ws.framework}</small></h2>
+            <span className={`mg-stamp ${ws.phase}`}>{ws.phase === "done" ? "verified" : ws.phase === "failed" ? "not verified" : ws.phase === "queued" ? "waiting" : "drafting"}</span>
+          </div>}
+          {busy && <Rail ws={ws} />}
+          <nav className="vw-tabs" role="tablist">
+            {([["paper", "The paper", "C"], ["table", "The table", "B"], ["notebook", "The notebook", "A"]] as const).map(([k, t, l]) =>
+              <button key={k} role="tab" aria-selected={view === k} className={view === k ? "on" : ""} onClick={() => setView(k)}><small>{l}</small>{t}</button>)}
+          </nav>
+          {ws.runErr && <div className="nx-err">{ws.runErr}</div>}
+          {view === "paper" && <PaperView ws={ws} onOpenTable={() => setView("table")} />}
+          {view === "table" && <TableView ws={ws} />}
+          {view === "notebook" && <NotebookView ws={ws} onReopen={id => { ws.openSaved(id); setTimeout(() => setView("table"), 300); }} live={<>
+            {!busy && ws.phase !== "idle" && <Rail ws={ws} />}
             <ol className="mg-drafts">{D.map((d, i) => (
               <li key={d.no} className={d.verdict}>
                 <div className="rr-draft-h"><span className="mg-folio">Draft {ROMAN[d.no] ?? d.no}</span>
@@ -151,10 +150,10 @@ export function ReadingRoom({ ws, faces, onOpenInstrument, onTour }: { ws: Works
             </ol>
             {ws.code && <div className="rr-codebar"><span>{fname}</span><button onClick={copy}>{copied ? "copied" : "copy"}</button><button onClick={download}>download .py</button></div>}
             {ws.code && <div className="mg-codebox" ref={codeBox}><CodeView ws={ws} range={range} setRange={setRange} /></div>}
-            {ws.phase === "failed" && ws.result && <p className="mg-dim">No draft passed after {ws.result.attempt_count} attempt(s){ws.result.error_details ? ` (${ws.result.error_details})` : ""}. The last draft is shown; it is not verified.</p>}
-            {ws.events.length > 0 && !busy && <button className={`mg-gate${ws.phase === "done" ? " ok" : ""}`} onClick={onOpenInstrument} disabled={busy}>
-              <small>Plate II</small><span>{ws.phase === "done" ? "Enter the instrument room" : "Open the instrument room"}</span><i>measured in the sandbox, not guessed →</i></button>}
-          </>}
+            {ws.phase === "failed" && ws.result && <p className="mg-dim">No draft passed after {ws.result.attempt_count} attempt(s){ws.result.error_details ? ` (${ws.result.error_details})` : ""}.</p>}
+          </>} />}
+          {ws.events.length > 0 && !busy && <button className={`mg-gate${ws.phase === "done" ? " ok" : ""}`} onClick={onOpenInstrument}>
+            <small>Plate II</small><span>{ws.phase === "done" ? "Enter the instrument room" : "Open the instrument room"}</span><i>measured in the sandbox, not guessed →</i></button>}
         </main>
 
         <aside className="mg-margin">

@@ -121,3 +121,12 @@ class VectorStoreManager:
                 "metadata":meta
             })
         return output
+
+
+    def paper_passages(self, paper_id: str, limit: int = 400) -> List[Dict[str, Any]]:
+        """Every stored chunk of one paper, in reading order (chunk ids are `<paper_id>_chunk_0000`, zero-padded,
+        so sorting by id IS document order). Used by the UI to rebuild the paper's text."""
+        got = self.collection.get(where={"paper_id": paper_id}, include=["documents", "metadatas"], limit=limit)
+        rows = [{"id": i, "text": d or "", "meta": m or {}} for i, d, m in zip(got.get("ids", []), got.get("documents", []), got.get("metadatas", []))]
+        rows = [r for r in rows if "_chunk_" in r["id"]]          # skip math-explanation docs
+        return sorted(rows, key=lambda r: r["id"])

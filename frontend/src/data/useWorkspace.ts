@@ -2,7 +2,7 @@
 // so a design can change what things look like but never what they do.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
-import type { RunSummary, AblationResult, Component, ExplainResult, GenResult, GraphOverview, Health, IngestJob, Paper, RunEvent, TranspileResult } from "../api/types";
+import type { Passage, SavedAblation, RunSummary, AblationResult, Component, ExplainResult, GenResult, GraphOverview, Health, IngestJob, Paper, RunEvent, TranspileResult } from "../api/types";
 import { parseTags } from "../lib/codeTags";
 
 export interface ChatTurn { role: "user" | "assistant"; content: string; cites?: string[]; passages?: string[]; error?: boolean }
@@ -14,6 +14,7 @@ export function useWorkspace() {
   const [health, setHealth] = useState<Health | null>(null);
   const [offline, setOffline] = useState(false);
   const [papers, setPapers] = useState<Paper[]>([]);
+  const [papersLoaded, setPapersLoaded] = useState(false);
   const [paperId, setPaperId] = useState<string | null>(null);
   const [graph, setGraph] = useState<GraphOverview | null>(null);
   const [components, setComponents] = useState<Component[]>([]);
@@ -41,6 +42,12 @@ export function useWorkspace() {
   const refreshShelf = useCallback(() => { if (paperId) api.history(paperId).then(setShelf).catch(() => setShelf([])); }, [paperId]);
   useEffect(() => { refreshShelf(); }, [refreshShelf]);
 
+  // ---- paper text + saved experiments ----
+  const [passages, setPassages] = useState<Passage[] | null>(null);
+  const [ablations, setAblations] = useState<SavedAblation[]>([]);
+  const refreshAblations = useCallback(() => { if (paperId) api.ablations(paperId).then(setAblations).catch(() => setAblations([])); }, [paperId]);
+  useEffect(() => { setPassages(null); if (paperId) api.passages(paperId).then(setPassages).catch(() => setPassages([])); refreshAblations(); }, [paperId, refreshAblations]);
+
   // ---- chat / tools ----
   const [chat, setChat] = useState<ChatTurn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -49,7 +56,7 @@ export function useWorkspace() {
 
   const refreshPapers = useCallback(async () => {
     try {
-      const p = await api.papers(); setPapers(p); setOffline(false); setLoadErr(null);
+      const p = await api.papers(); setPapers(p); setPapersLoaded(true); setOffline(false); setLoadErr(null);
       setPaperId(cur => cur && p.some(x => x.paper_id === cur) ? cur : p[0]?.paper_id ?? null);
       return p;
     } catch (e) {
@@ -183,9 +190,9 @@ export function useWorkspace() {
   const runAblation = useCallback(async (mutation: string) => {
     if (!paperId || !component || !code) return;
     setAblation({ busy: true });
-    try { setAblation({ busy: false, data: await api.ablation({ paper_id: paperId, target_component: component.id, baseline_code: code, expected_inputs: inputsForTools, mutation_prompt: mutation }) }); }
+    try { setAblation({ busy: false, data: await api.ablation({ paper_id: paperId, target_component: component.id, baseline_code: code, expected_inputs: inputsForTools, mutation_prompt: mutation }) }); refreshAblations(); }
     catch (e) { setAblation({ busy: false, err: errMsg(e) }); }
-  }, [paperId, component, code, inputsForTools]);
+  }, [paperId, component, code, inputsForTools, refreshAblations]);
 
   const runTranspile = useCallback(async (target: string) => {
     if (!code) return;
@@ -195,8 +202,8 @@ export function useWorkspace() {
   }, [code, framework, skeleton, inputsForTools]);
 
   return {
-    health, offline, papers, paperId, setPaperId, graph, components, loadErr, selected, setSelected, hover, setHover,
-    shelf, openSaved, refreshShelf,
+    health, offline, papers, papersLoaded, paperId, setPaperId, graph, components, loadErr, selected, setSelected, hover, setHover,
+    shelf, openSaved, refreshShelf, passages, ablations,
     phase, events, current, activeNode, attempts, result, component, framework, setFramework, elapsed, runErr, startRun,
     code, tags, litIds, traces, expectedInputs, skeleton,
     job, ingestErr, upload,

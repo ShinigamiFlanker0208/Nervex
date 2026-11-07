@@ -212,7 +212,7 @@ async def run_ablation_experiment(request: AblationStudyRequest) -> AblationStud
             report = await controller.run_ablation_experiment(baseline_state, request.mutation_prompt)
         except ValueError as exc:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, str(exc))
-    return AblationStudyResponse(
+    resp = AblationStudyResponse(
         mutation_prompt=request.mutation_prompt,
         baseline_code=request.baseline_code,
         ablated_code=report["mutated_code"],
@@ -220,6 +220,30 @@ async def run_ablation_experiment(request: AblationStudyRequest) -> AblationStud
         ablated_metrics=report["ablated_metrics"],
         diff_explanation=report["diff_summary"],
     )
+    try:
+        from api.runs import save_ablation
+        save_ablation(request.paper_id, request.target_component, resp.model_dump())
+    except Exception:
+        log.exception("could not save ablation")
+    return resp
+
+
+@router.get("/features/ablations", summary="Saved ablation experiments for a paper (optionally one component)")
+async def ablation_history(paper_id: str, component: str = "") -> List[Dict[str, Any]]:
+    import asyncio
+    from api.runs import list_ablations
+    return await asyncio.to_thread(list_ablations, paper_id, component or None)
+
+
+@router.get("/papers/{paper_id}/passages", summary="The paper's stored text, in reading order")
+async def paper_passages(paper_id: str) -> List[Dict[str, Any]]:
+    import asyncio
+    try:
+        rows = await asyncio.to_thread(deps.get_vector_db().paper_passages, paper_id)
+    except Exception as exc:
+        log.exception("passages failed")
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, f"Vector store error: {type(exc).__name__}")
+    return [{"id": r["id"], "text": r["text"], "header": (r["meta"] or {}).get("header") or (r["meta"] or {}).get("section") or ""} for r in rows]
 
 
 @router.post("/features/transpile", response_model=TranspilationResponse,

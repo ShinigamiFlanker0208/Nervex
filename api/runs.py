@@ -143,3 +143,30 @@ def load_history(run_id: str) -> Optional[Dict[str, Any]]:
     except (OSError, ValueError):
         return None
     return {**run, "events": run.get("events", []), "total_events": len(run.get("events", []))}
+
+
+# ----------------------------------------------------------------------------------------------
+# Ablations are experiments: keep them next to the runs so the notebook can show every one.
+def _abl_dir() -> Path:
+    d = _dir() / "ablations"; d.mkdir(parents=True, exist_ok=True); return d
+
+
+def save_ablation(paper_id: str, component: str, report: Dict[str, Any]) -> str:
+    import uuid
+    aid = uuid.uuid4().hex
+    path = _abl_dir() / f"{aid}.json"; tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"ablation_id": aid, "paper_id": paper_id, "component": component, "created_at": time.time(), **report}))
+    tmp.replace(path)
+    return aid
+
+
+def list_ablations(paper_id: str, component: Optional[str] = None) -> List[Dict[str, Any]]:
+    out = []
+    for p in _abl_dir().glob("*.json"):
+        try:
+            a = json.loads(p.read_text())
+        except (OSError, ValueError):
+            continue
+        if a.get("paper_id") == paper_id and (component is None or a.get("component") == component):
+            out.append(a)
+    return sorted(out, key=lambda a: -(a.get("created_at") or 0))

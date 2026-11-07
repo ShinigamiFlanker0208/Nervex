@@ -27,11 +27,16 @@ export class ForceSim {
     for (const n of this.nodes) { const o = old.index.get(n.id); if (o) { n.x = o.x; n.y = o.y; } }
     return this;
   }
-  resize(w: number, h: number) { this.w = w; this.h = h; this.alpha = Math.max(this.alpha, .3); }
+  resize(w: number, h: number) { this.w = w; this.h = h; this.alpha = Math.max(this.alpha, .35); }
+  /** Slow, small, per-node drift for drawing (px). Deterministic per node; never feeds back into the layout. */
+  static breathe(id: string, t: number, amp = 1.6) { let h = 7; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0; const ph = (h % 628) / 100; return [Math.sin(t / 2900 + ph) * amp, Math.cos(t / 3700 + ph * 1.3) * amp]; }
   kick(a = .5) { this.alpha = Math.max(this.alpha, a); }
   tick() {
     const { nodes, edges, w, h } = this;
-    this.alpha = 1;      // constant forces + damping => a steady equilibrium (annealing collapsed loose nodes into a ball)
+    // Cool down. ALL forces (repulsion, springs, gravity, wall) scale by alpha together, so the equilibrium shape is
+    // kept and only the speed falls; at rest the layout is still (the drawing adds a slow breathing drift instead).
+    // (An earlier version cooled repulsion but not gravity, which collapsed the graph into a ball.)
+    this.alpha = Math.max(0, this.alpha * .985 - .0004); if (this.alpha <= 0) return false; const al = this.alpha;
     const k = Math.sqrt((w * h) / Math.max(1, nodes.length)) * 0.5;
     for (let i = 0; i < nodes.length; i++) {
       const p = nodes[i];
@@ -39,24 +44,24 @@ export class ForceSim {
         const q = nodes[j]; let dx = p.x - q.x, dy = p.y - q.y; let d2 = dx * dx + dy * dy;
         if (d2 > k * k * 6) continue;
         if (d2 < 1) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = 1; }
-        const d = Math.sqrt(d2), f = (k * k) / d / d * 0.35;
+        const d = Math.sqrt(d2), f = (k * k) / d / d * 0.35 * al;
         p.vx += dx * f; p.vy += dy * f; q.vx -= dx * f; q.vy -= dy * f;
       }
     }
     for (const e of edges) {
       const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
-      const f = (d - k * .9) / d * 0.05;
+      const f = (d - k * .9) / d * 0.05 * al;
       e.a.vx += dx * f; e.a.vy += dy * f; e.b.vx -= dx * f; e.b.vy -= dy * f;
     }
     for (const n of nodes) {
       // gravity is NOT scaled by alpha: when the layout cools, loosely-connected nodes must stay near the middle
       // nodes with no edge in this subset have nothing to hold them: stronger gravity makes a halo, not a border
       const gk = this.linked.has(n.id) ? 1 : 3.4;
-      n.vx += (w / 2 - n.x) * 0.0018 * gk; n.vy += (h / 2 - n.y) * 0.0028 * gk;
+      n.vx += (w / 2 - n.x) * 0.0018 * gk * al; n.vy += (h / 2 - n.y) * 0.0028 * gk * al;
       // soft containment: an elliptical wall that pushes back harder the further out a node is. A hard clamp alone
       // pins every unconnected node to the border and draws ruler-straight rows of dots.
       const ex = (n.x - w / 2) / Math.max(1, (w - this.padRight) / 2 - 10), ey = (n.y - h / 2) / Math.max(1, h / 2 - 24), er = Math.hypot(ex, ey);
-      if (er > .78) { const push = (er - .78) * 2.6; n.vx -= (ex / er) * push; n.vy -= (ey / er) * push; }
+      if (er > .78) { const push = (er - .78) * 2.6 * al; n.vx -= (ex / er) * push; n.vy -= (ey / er) * push; }
       const sp = Math.hypot(n.vx, n.vy); if (sp > 7) { n.vx *= 7 / sp; n.vy *= 7 / sp; }
       if (!n.fixed) { n.x += n.vx; n.y += n.vy; }
       n.vx *= 0.78; n.vy *= 0.78;

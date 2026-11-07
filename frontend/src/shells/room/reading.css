@@ -27,3 +27,12 @@
 .rr-lens h5 { margin:6px 0 8px; font:600 .62rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); }
 .rr-eq { padding:10px 0; border-bottom:1px solid var(--line); display:flex; flex-direction:column; gap:3px; transition:.2s; } .rr-eq.hot { background:rgba(179,38,30,.06); margin:0 -10px; padding:10px; }
 .rr-eq .rr-tex { font-size:1.05rem; overflow-x:auto; overflow-y:hidden; } .rr-eq small { font:.62rem "JetBrains Mono"; color:var(--faint); } .rr-eq button { align-self:flex-start; background:none; border:0; padding:0; cursor:pointer; font:italic .98rem "Instrument Serif"; color:var(--pencil); border-bottom:1px solid; } .rr-eq em { font:italic .9rem "Instrument Serif"; color:var(--faint); } .rr-eq.cited { border-left:2px solid var(--pencil); padding-left:10px; }
+
+/* chapters tree toggle: closed -> the graph owns the column */
+.rr-treebtn { display:flex; align-items:center; gap:8px; width:100%; background:none; border:0; border-bottom:1px solid var(--line); padding:0 0 6px; margin-bottom:8px; cursor:pointer; color:var(--mut); text-align:left; }
+.rr-treebtn span { font:italic 1.15rem "Instrument Serif"; color:var(--ink); } .rr-treebtn em { font:.66rem "JetBrains Mono"; font-style:normal; color:var(--faint); }
+.rr-treebtn i { margin-left:auto; font:.66rem "JetBrains Mono"; font-style:normal; letter-spacing:.1em; text-transform:uppercase; } .rr-treebtn:hover, .rr-treebtn:hover span { color:var(--pencil); }
+.mg-grid { transition:grid-template-columns .5s cubic-bezier(.22,.8,.24,1); }
+.mg-grid.tree-closed { grid-template-columns:min(460px,34vw) minmax(0,1fr) 320px; }
+.mg-grid.tree-closed .rr-mini { position:sticky; top:16px; margin-top:4px; } .mg-grid.tree-closed .rr-mini .mg-plate-canvas { height:min(70vh,640px); }
+@media (max-width:1150px) { .mg-grid.tree-closed { grid-template-columns:1fr; } .mg-grid.tree-closed .rr-mini .mg-plate-canvas { height:360px; } }

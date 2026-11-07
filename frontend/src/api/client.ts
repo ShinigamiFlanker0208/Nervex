@@ -42,6 +42,8 @@ export const api = {
     req<{ run_id: string }>(`${V}/generate/runs`, json({ paper_id, target_component, target_framework })),
   history: (pid: string) => req<T.RunSummary[]>(`${V}/generate/history?paper_id=${pid}`),
   historyItem: (id: string) => req<T.RunStatus>(`${V}/generate/history/${id}`),
+  passages: (pid: string) => req<T.Passage[]>(`${V}/papers/${pid}/passages`),
+  ablations: (pid: string) => req<T.SavedAblation[]>(`${V}/features/ablations?paper_id=${pid}`),
   config: () => req<T.SystemConfig>(`${V}/system/config`),
   run: (id: string, since: number) => req<T.RunStatus>(`${V}/generate/runs/${id}?since=${since}`),
   explain: (b: { paper_id: string; user_question: string; start: number; end: number; code: string; history: { role: string; content: string }[] }) =>

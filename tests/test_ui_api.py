@@ -133,3 +133,16 @@ def test_researcher_event_carries_latex():
 def test_tests_do_not_touch_real_runs_dir():
     from config import settings
     assert "pytest" in str(settings.RUNS_DIR) or "tmp" in str(settings.RUNS_DIR)
+
+
+def test_passages_are_returned_in_reading_order(client, monkeypatch):
+    class V:
+        def paper_passages(self, pid): return [{"id": "p_chunk_0000", "text": "a", "meta": {"header": "Intro"}}]
+    monkeypatch.setattr(deps, "get_vector_db", lambda: V())
+    assert client.get("/api/v1/papers/p/passages").json() == [{"id": "p_chunk_0000", "text": "a", "header": "Intro"}]
+
+
+def test_ablations_are_saved_and_filtered():
+    from api.runs import save_ablation, list_ablations
+    save_ablation("p", "mha", {"mutation_prompt": "drop w_o"}); save_ablation("p", "ffn", {"mutation_prompt": "x"})
+    assert [a["mutation_prompt"] for a in list_ablations("p", "mha")] == ["drop w_o"] and len(list_ablations("p")) == 2

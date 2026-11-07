@@ -48,3 +48,5 @@ export interface SystemConfig {
   loop: { max_attempts: number; loop_timeout_s: number };
   ingest: { extraction_concurrency: number; max_failed_fraction: number; max_upload_mb: number; ocr_gpu_fraction: number };
 }
+export interface Passage { id: string; text: string; header: string }
+export interface SavedAblation extends AblationResult { ablation_id: string; paper_id: string; component: string; created_at: number }

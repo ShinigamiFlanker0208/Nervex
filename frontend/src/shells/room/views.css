@@ -1,0 +1,69 @@
+/* ---------- view switcher: three bookmarks ---------- */
+.vw-tabs { display:flex; gap:4px; margin:4px 0 22px; border-bottom:1.5px solid var(--ink); }
+.vw-tabs button { background:none; border:1px solid transparent; border-bottom:0; padding:9px 18px 7px; cursor:pointer; font:italic 1.25rem "Instrument Serif"; color:var(--faint); position:relative; top:1.5px; display:flex; gap:8px; align-items:baseline; border-radius:3px 3px 0 0; }
+.vw-tabs button small { font:600 .58rem "JetBrains Mono"; font-style:normal; letter-spacing:.2em; color:var(--faint); }
+.vw-tabs button:hover { color:var(--ink); }
+.vw-tabs button.on { color:var(--ink); background:var(--paper); border-color:var(--ink); border-bottom:1.5px solid var(--paper); } .vw-tabs button.on small { color:var(--pencil); }
+
+/* ---------- C · the paper ---------- */
+.pv { max-width:68ch; } .pv-hint { font-size:.82rem; color:var(--mut); margin:0 0 26px; } .pv-hint i { font-family:"Instrument Serif"; color:var(--faint); font-size:.95rem; }
+.pv-pass { position:relative; } .pv p { font:1.06rem/1.78 Georgia,"Times New Roman",serif; color:#2a221b; margin:0 0 1em; text-align:justify; hyphens:auto; }
+.pv-pass:first-of-type p:first-child::first-letter { font:400 3.8rem/.8 "Instrument Serif"; float:left; padding:6px 8px 0 0; color:var(--pencil); }
+.pv-h { font:italic 400 1.75rem/1.15 "Instrument Serif"; margin:1.6em 0 .5em; } .pv-h.h1 { font-size:2.3rem; } .pv-h.h3, .pv-h.h4 { font-size:1.35rem; }
+.pv-table { font:.72rem/1.5 "JetBrains Mono"; background:rgba(255,255,255,.45); border:1px solid var(--line); padding:10px; overflow:auto; }
+.pv-eq { font:italic .9em "Instrument Serif"; color:var(--good); border:1px solid rgba(47,107,67,.4); border-radius:2px; padding:0 5px; white-space:nowrap; }
+.pv-mark { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; text-decoration:underline; text-decoration-color:var(--pencil); text-decoration-thickness:1.5px; text-underline-offset:3px; transition:background .2s; }
+.pv-mark:hover, .pv-mark.hot { background:rgba(179,38,30,.1); } .pv-mark.cur { background:rgba(179,38,30,.16); font-style:italic; } .pv-mark.done { text-decoration-style:double; } .pv-mark:disabled { cursor:wait; }
+.pv-mark.demo { cursor:default; }
+.pv-pull { position:absolute; left:calc(100% + 28px); top:0; width:300px; background:#1b1612; color:#e9e1d0; padding:14px 16px; box-shadow:6px 6px 0 var(--pencil); animation:pvin .6s cubic-bezier(.22,.8,.24,1); z-index:2; }
+@keyframes pvin { from { opacity:0; transform:translateX(-16px); } }
+.pv-pull small { font:600 .58rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:#b8975a; } .pv-pull.failed small { color:#e2523a; }
+.pv-pull b { display:block; font:italic 400 1.4rem "Instrument Serif"; margin:2px 0 8px; } .pv-pull pre { font:.64rem/1.5 "JetBrains Mono"; color:#b5ad9b; margin:0 0 10px; overflow:hidden; white-space:pre; }
+.pv-pull button { background:none; border:0; border-bottom:1px solid; color:#e9e1d0; cursor:pointer; padding:0; font:italic 1rem "Instrument Serif"; }
+@media (max-width:1500px) { .pv-pull { position:relative; left:auto; width:auto; margin:6px 0 22px; } }
+
+/* ---------- B · the dissection table ---------- */
+.tv { display:grid; grid-template-columns:minmax(0,1fr) 270px; gap:22px; align-items:start; }
+.tv-mat { position:relative; background:#2f4a3c; border-radius:6px; padding:26px 22px 22px 40px; box-shadow:inset 0 0 0 1px rgba(0,0,0,.25), 0 18px 40px -24px rgba(30,40,30,.7);
+  background-image:linear-gradient(rgba(233,225,208,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(233,225,208,.08) 1px,transparent 1px),linear-gradient(rgba(233,225,208,.04) 1px,transparent 1px),linear-gradient(90deg,rgba(233,225,208,.04) 1px,transparent 1px);
+  background-size:60px 60px,60px 60px,12px 12px,12px 12px; color:#e9e1d0; min-height:420px; }
+.tv-ruler { position:absolute; left:10px; top:22px; bottom:22px; width:14px; display:flex; flex-direction:column; justify-content:space-between; } .tv-ruler i { height:1px; background:rgba(233,225,208,.45); width:7px; } .tv-ruler i:nth-child(4n+1) { width:14px; }
+.tv-io { display:flex; gap:12px; align-items:baseline; margin:0 0 14px; font:.72rem "JetBrains Mono"; } .tv-io small { letter-spacing:.2em; text-transform:uppercase; color:#b8975a; } .tv-io.out { margin:16px 0 0; }
+.tv-group { margin:0 0 12px; padding:10px 12px 12px; border:1px dashed rgba(233,225,208,.28); border-radius:4px; position:relative; }
+.tv-group.rep { box-shadow:5px 5px 0 -1px #2f4a3c, 5px 5px 0 0 rgba(233,225,208,.22), 10px 10px 0 -1px #2f4a3c, 10px 10px 0 0 rgba(233,225,208,.13); }
+.tv-group header { display:flex; justify-content:space-between; font:.66rem "JetBrains Mono"; letter-spacing:.08em; color:#b5c4b6; margin-bottom:8px; } .tv-group header em { font:italic 1.2rem "Instrument Serif"; color:#f2c46d; letter-spacing:0; }
+.tv-blocks { display:flex; flex-direction:column; gap:6px; align-items:center; }
+.tv-b { display:flex; align-items:baseline; gap:10px; min-width:200px; background:#f4ecde; color:#1b1612; border:0; border-radius:2px; padding:8px 12px; cursor:pointer; text-align:left; font:inherit; box-shadow:0 2px 0 rgba(0,0,0,.25), 0 8px 14px -10px rgba(0,0,0,.6); transition:transform .2s, box-shadow .2s; }
+.tv-b:hover { transform:translateY(-2px) rotate(-.3deg); box-shadow:0 4px 0 rgba(0,0,0,.2), 0 16px 22px -12px rgba(0,0,0,.7); }
+.tv-b.on { outline:2px solid #f2c46d; outline-offset:2px; } .tv-b b { font:italic 400 1.15rem "Instrument Serif"; } .tv-b i { font:.6rem "JetBrains Mono"; letter-spacing:.14em; text-transform:uppercase; color:#8a7c6c; font-style:normal; }
+.tv-b { flex-wrap:wrap; } .tv-b span { margin-left:auto; font:.68rem "JetBrains Mono"; color:#4a3f35; white-space:nowrap; } .tv-b span.chg { color:var(--pencil); font-weight:600; }
+.tv-b.k-LayerNorm { background:#e6dcc8; } .tv-b.k-Attention { background:#f7e3d6; }
+.tv-b.lifting { animation:tvlift 1.6s ease-in-out infinite; } @keyframes tvlift { 50% { transform:translate(8px,-10px) rotate(2deg); box-shadow:0 22px 30px -14px rgba(0,0,0,.8); opacity:.7; } }
+.tv-insp { position:sticky; top:16px; } .tv-insp small { font:600 .6rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--pencil); }
+.tv-insp h4 { font:italic 400 2rem/1 "Instrument Serif"; margin:4px 0 6px; } .tv-path { font:.68rem "JetBrains Mono"; color:var(--mut); word-break:break-all; }
+.tv-insp dl { display:grid; grid-template-columns:34px 1fr; gap:2px 8px; font:.78rem "JetBrains Mono"; margin:12px 0; } .tv-insp dt { color:var(--faint); }
+.tv-insp h5 { margin:16px 0 6px; font:600 .6rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); }
+.tv-insp pre { font:.66rem/1.55 "JetBrains Mono"; background:#faf4e8; border:1px solid var(--line); padding:8px; overflow:auto; margin:0; }
+.tv-cite { margin:0 0 8px; font:italic 1.1rem "Instrument Serif"; border-left:2px solid var(--pencil); padding-left:10px; cursor:default; } .tv-cite span { display:block; font:.78rem Outfit; font-style:normal; color:var(--mut); }
+.tv-lift { margin-top:18px; width:100%; background:#1b1612; color:#f4ecde; border:0; padding:11px; cursor:pointer; font:italic 1.15rem "Instrument Serif"; box-shadow:4px 4px 0 var(--pencil); } .tv-lift:disabled { opacity:.45; cursor:wait; } .tv-note { font-size:.74rem; margin-top:8px; }
+.tv-empty { position:relative; } .tv-empty .tv-mat { min-height:300px; } .tv-empty p { position:absolute; inset:0; display:grid; place-items:center; text-align:center; padding:40px; margin:0; font:italic 1.4rem "Instrument Serif"; color:#cfd8cf; }
+@media (max-width:1100px) { .tv { grid-template-columns:1fr; } .tv-insp { position:static; } }
+
+/* ---------- A · the notebook ---------- */
+.nb { background:#fbf6ec; border:1px solid var(--line); padding:20px 26px 30px 0; position:relative; box-shadow:0 18px 40px -30px rgba(60,40,20,.6);
+  background-image:linear-gradient(90deg,transparent 108px,rgba(179,38,30,.35) 108px,rgba(179,38,30,.35) 109px,transparent 109px),repeating-linear-gradient(transparent 0 31px,rgba(70,110,160,.13) 31px 32px); }
+.nb-head { display:flex; gap:16px; align-items:baseline; padding-left:128px; margin-bottom:10px; } .nb-head h3 { margin:0; font:italic 400 1.9rem "Instrument Serif"; } .nb-head span { font:.72rem "JetBrains Mono"; color:var(--faint); } .nb-head label { margin-left:auto; font:.74rem "JetBrains Mono"; color:var(--mut); }
+.nb-day { margin:22px 0 6px; padding-left:128px; font:600 .64rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--pencil); }
+.nb-entry { display:grid; grid-template-columns:108px 1fr; gap:20px; padding:10px 0 14px; }
+.nb-margin { text-align:right; padding-right:10px; } .nb-margin b { display:block; font:italic 400 1.15rem "Instrument Serif"; } .nb-margin i { font:.68rem "JetBrains Mono"; color:var(--faint); font-style:normal; }
+.nb-body h5 { margin:0 0 4px; font:400 1.1rem Outfit; } .nb-body h5 em { font:italic 1.3rem "Instrument Serif"; } .nb-body p { margin:0 0 6px; font-size:.92rem; line-height:1.6; color:#3d332a; }
+.nb-verdict { font:600 .58rem "JetBrains Mono"; letter-spacing:.18em; text-transform:uppercase; border:1.3px solid; padding:2px 6px; margin-left:6px; display:inline-block; transform:rotate(-2deg); } .nb-verdict.ok { color:var(--good); } .nb-verdict.bad { color:var(--pencil); }
+.nb-acts { display:flex; gap:16px; } .nb-acts button { background:none; border:0; border-bottom:1px solid currentColor; padding:0; cursor:pointer; font:italic 1rem "Instrument Serif"; color:var(--mut); } .nb-acts button:hover { color:var(--pencil); }
+.nb-entry.live { background:rgba(255,255,255,.4); border-top:1px solid var(--line); border-bottom:1px solid var(--line); } .nb-entry.live .nb-margin i { color:var(--pencil); }
+.nb-entry.abl blockquote { margin:4px 0 8px; font:italic 1.2rem/1.4 "Instrument Serif"; color:var(--pencil); border:0; padding:0; } .nb-entry.abl blockquote::before { content:"“"; } .nb-entry.abl blockquote::after { content:"”"; }
+.nb-ba { display:flex; gap:16px; align-items:center; } .nb-ba div { display:flex; flex-direction:column; } .nb-ba small { font:.58rem "JetBrains Mono"; letter-spacing:.2em; text-transform:uppercase; color:var(--faint); } .nb-ba b { font:400 2rem/1 "Instrument Serif"; } .nb-ba span { font-size:.72rem; color:var(--mut); } .nb-ba > i { font-size:1.4rem; color:var(--faint); }
+.nb-expl { font-size:.86rem; color:var(--mut); margin-top:6px; }
+.nb-detail { margin-top:10px; padding:10px 12px; background:rgba(255,255,255,.55); border-left:2px solid var(--line); } .nb-detail ol { list-style:none; padding:0; margin:6px 0; } .nb-detail li { display:grid; grid-template-columns:48px 1fr; font-size:.82rem; padding:3px 0; } .nb-detail time { font:.68rem "JetBrains Mono"; color:var(--faint); }
+.nb-detail li.bad span { color:var(--pencil); } .nb-detail li.ok span { color:var(--good); } .nb-pencil { font:italic 1rem/1.35 "Instrument Serif"; color:var(--pencil); }
+.nb-blank { padding:30px 0 30px 128px; font:italic 1.3rem "Instrument Serif"; }
+@media (max-width:760px) { .nb { padding-right:12px; background-image:repeating-linear-gradient(transparent 0 31px,rgba(70,110,160,.13) 31px 32px); } .nb-entry { grid-template-columns:1fr; gap:2px; } .nb-margin { text-align:left; } .nb-head, .nb-day, .nb-blank { padding-left:12px; } }
